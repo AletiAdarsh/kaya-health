@@ -60,7 +60,7 @@ import com.kaya.health.band.BandViewModel
 
 /** First screen after install: what Kaya is, the privacy promise, then set up or restore. */
 @Composable
-fun WelcomeScreen(vm: AppViewModel, onStart: () -> Unit) {
+fun WelcomeScreen(vm: AppViewModel, onStart: () -> Unit) = androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.background) {
     Column(
         Modifier.fillMaxSize().background(MaterialTheme.colorScheme.background).statusBarsPadding().navigationBarsPadding()
             .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 28.dp),
@@ -113,7 +113,7 @@ fun connectStepDone(context: Context) = context.getSharedPreferences(PREFS, Cont
 
 /** After setup: grant what Kaya needs, each explained, each optional. */
 @Composable
-fun ConnectScreen(vm: AppViewModel, band: BandViewModel, onDone: () -> Unit) {
+fun ConnectScreen(vm: AppViewModel, band: BandViewModel, onDone: () -> Unit) = androidx.compose.material3.Surface(color = MaterialTheme.colorScheme.background) {
     val context = LocalContext.current
     val hc by vm.hc.collectAsState()
     var tick by remember { mutableIntStateOf(0) }   // re-read grants after each prompt
