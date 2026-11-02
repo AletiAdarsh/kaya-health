@@ -146,6 +146,17 @@ fun KayaApp(vm: AppViewModel = viewModel(), band: BandViewModel = viewModel()) {
         ConnectScreen(vm, band) { connectDone = true }
         return
     }
+    val backupState by vm.backup.collectAsState()
+    var backupDone by rememberSaveable { mutableStateOf(backupStepDone(context) || backupState.uri != null) }
+    if (!backupDone) {
+        BackupStepScreen(vm) { backupDone = true }
+        return
+    }
+    var showTour by rememberSaveable { mutableStateOf(!tourDone(context)) }
+    if (showTour) {
+        TourScreen(band) { setTourDone(context, true); showTour = false }
+        return
+    }
 
     ModalNavigationDrawer(
         drawerState = drawer,
@@ -175,6 +186,7 @@ fun KayaApp(vm: AppViewModel = viewModel(), band: BandViewModel = viewModel()) {
                                 vm, firstRun = false,
                                 onOpenCheck = { go(Dest.CHECK) }, onOpenBand = { go(Dest.DEVICE) },
                                 onConnectHealth = { permissionLauncher.launch(vm.permissionsToRequest()) },
+                                band = band, onTour = { showTour = true },
                             )
                             Dest.CALORIES -> TodayScreen(vm, onConnect = { permissionLauncher.launch(vm.permissionsToRequest()) }, onOpenProfile = { go(Dest.SETTINGS) })
                             Dest.DEVICE -> BandScreen(band)
@@ -249,8 +261,7 @@ private fun Menu(vm: AppViewModel, band: BandViewModel, current: Dest, go: (Dest
                 Column(Modifier.weight(1f)) {
                     Text("Noise REP", style = MaterialTheme.typography.titleMedium)
                     Text(
-                        when (bandState) { is BandState.Connected -> "Connected"; is BandState.Connecting -> "Connecting…"; else -> "Not connected" } +
-                            (battery?.let { " · ${it.percent}%" } ?: ""),
+                        rememberBandStatus(band).title + (battery?.takeIf { bandState is BandState.Connected }?.let { " · ${it.percent}%" } ?: ""),
                         style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 }

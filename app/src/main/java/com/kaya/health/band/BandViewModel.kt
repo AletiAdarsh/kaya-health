@@ -111,6 +111,10 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     private val _frequency = MutableStateFlow<MeasureFrequency?>(null)
     val frequency: StateFlow<MeasureFrequency?> = _frequency.asStateFlow()
 
+    private val _reconnecting = MutableStateFlow(false)
+    /** True for the few seconds between a dropped link and the automatic reconnect. */
+    val reconnecting: StateFlow<Boolean> = _reconnecting.asStateFlow()
+
     private val _busy = MutableStateFlow<String?>(null)
     val busy: StateFlow<String?> = _busy.asStateFlow()
 
@@ -183,8 +187,9 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     fun dismissWalk(w: com.kaya.health.engine.Walk) { walkStore.dismiss(w.key); _walksVersion.value++ }
     private var syncJob: Job? = null
 
-    fun connectAndSync() {
+    fun connectAndSync(force: Boolean = false) {
         if (syncJob?.isActive == true) return
+        if (force) { client.clearBackoff(); retries = 0 }
         syncJob = viewModelScope.launch {
             try {
                 _busy.value = "Connecting to the band…"
@@ -205,7 +210,12 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
         _syncStatus.update { it.copy(running = true, step = "Reading today from your band") }
         val t0 = System.currentTimeMillis()
         try {
-            syncInner(); lastSync = Instant.now()
+            syncInner()
+            // A busy band (another app using it) answers nothing: don't count that as a sync, and try again shortly.
+            if (client.backingOff) retryLaterIfBusy() else lastSync = Instant.now()
+            // A fresh install can analyse sleep before the band's sleep log has arrived; once it's saved, redo it.
+            if (_sleep.value.result != null && !_sleep.value.fromBandWindow && store.load(LocalDate.now(), Commands.METRIC_SLEEP_BREATHING) != null)
+                viewModelScope.launch { computeSleep(online = false) }
             val ms = System.currentTimeMillis() - t0
             Log.i(BandClient.TAG, "sync took $ms ms")
             _syncStatus.update { it.copy(lastAt = Instant.now(), lastMs = ms, failed = client.backingOff) }
@@ -301,6 +311,29 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
             )
         }
         lastIndex = available
+        backfill(available)
+    }
+
+    /**
+     * Data from before Kaya was installed (or days it missed): every older (day, metric) the band still holds and
+     * Kaya hasn't saved, then heart rate from Health Connect for the past week where the band had nothing.
+     * The band forgets days once another app syncs them, so this keeps whatever is still there.
+     */
+    private suspend fun backfill(available: Set<Pair<LocalDate, Int>>?) {
+        val today = LocalDate.now()
+        val missing = available.orEmpty().filter { (d, m) -> d.isBefore(today.minusDays(1)) && m in BandSync.METRICS && store.load(d, m) == null }
+            .sortedByDescending { it.first }
+        if (missing.isNotEmpty()) Log.i(BandClient.TAG, "backfill from band: ${missing.size} older series")
+        for ((d, m) in missing) {
+            _syncStatus.update { it.copy(step = "Saving earlier days from your band ($d)") }
+            runCatching { fetchSeries(d.atStartOfDay(), m, d) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+        }
+        for (i in 2L..7L) {
+            val d = today.minusDays(i)
+            if (store.load(d, Commands.METRIC_HEART_RATE) != null) continue
+            runCatching { heartRateFromHealthConnect(d) }.onFailure { if (it is kotlinx.coroutines.CancellationException) throw it }
+                .getOrNull()?.let { store.save(d, Commands.METRIC_HEART_RATE, it) }
+        }
     }
 
     @Volatile private var lastIndex: Set<Pair<LocalDate, Int>>? = null
@@ -491,7 +524,10 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 val breathing = bandWindow?.let { (a, b) -> inWindow.filter { !it.first.isBefore(a) && it.first.isBefore(b) }.map { it.second } }
                 Log.i(BandClient.TAG, "band sleep window (breathing): $bandWindow, breaths/min avg=${breathing?.average()}")
-                val r = com.kaya.health.engine.SleepAnalyzer.analyze(readings, steps, from, to, bandWindow)
+                // Without the band's own sleep log, heart rate alone can mistake a quiet, seated morning for sleep:
+                // never let that fallback run past 11 am.
+                val hrOnlyTo = if (bandWindow == null) minOf(to, today.atTime(11, 0)) else to
+                val r = com.kaya.health.engine.SleepAnalyzer.analyze(readings, steps, from, hrOnlyTo, bandWindow)
                 Log.i(
                     BandClient.TAG,
                     "sleep: readings=${readings.size} window=$from..$to → " + (r?.let {
@@ -676,6 +712,43 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     init {
         runCatching { BandSync.schedule(app) }
         BandSync.viaApp = { backgroundSyncAll() }
+        // The link can drop when another app ends its session on the shared connection. While Kaya is on screen,
+        // reconnect by itself (a few times a minute at most) instead of leaving the user on "disconnected".
+        viewModelScope.launch {
+            var prev: BandState = client.state.value
+            val recent = ArrayDeque<Long>()
+            client.state.collect { st ->
+                val dropped = prev is BandState.Connected && st is BandState.Failed
+                prev = st
+                if (!dropped || !inForeground || _live.value.running) return@collect
+                val now = System.currentTimeMillis()
+                while (recent.isNotEmpty() && now - recent.first() > 60_000) recent.removeFirst()
+                if (recent.size >= 3) return@collect
+                recent.addLast(now)
+                _reconnecting.value = true
+                delay(3_000)
+                if (inForeground && client.state.value !is BandState.Connected) connectAndSync()
+                _reconnecting.value = false
+            }
+        }
+        // Passive capture: when another app (NoiseFit) syncs over the shared link, the band's data replies pass by
+        // Kaya too. Save any series that's new or more complete than Kaya's copy, before the band deletes the day.
+        viewModelScope.launch {
+            client.payloads.collect { p ->
+                if (Decode.type(p)?.toInt() != Commands.TYPE_SERIES) return@collect
+                val series = runCatching { Decode.allSeries(p) }.getOrDefault(emptyList())
+                    .filter { s -> s.samples.any { it > 0 } || s.hourly.isNotEmpty() }
+                for (s in series) {
+                    val day = s.start.toLocalDate()
+                    store.save(day, s.metric, s)
+                    if (s.metric == Commands.METRIC_HEART_RATE || s.metric == Commands.METRIC_ACTIVITY) {
+                        val hr = store.load(day, Commands.METRIC_HEART_RATE); val act = store.load(day, Commands.METRIC_ACTIVITY)
+                        _days.value = LinkedHashMap(_days.value).apply { put(day, BandDay(day, hr, act, Instant.now())) }
+                    }
+                }
+                if (series.isNotEmpty()) Log.i(BandClient.TAG, "captured in passing: " + series.joinToString { "${it.start.toLocalDate()} m${it.metric}" })
+            }
+        }
     }
 
     /**
@@ -687,7 +760,12 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     private var retries = 0
 
     /** Kaya is on screen again. */
-    fun onForeground() { inForeground = true; retries = 0 }
+    fun onForeground() {
+        inForeground = true; retries = 0
+        // Kaya let go of the band when it went to the background; take it back so the header and data are live.
+        val st = client.state.value
+        if (hasPermissions(getApplication()) && st !is BandState.Connected && st !is BandState.Connecting) connectAndSync()
+    }
 
     /**
      * The band ignored us because another app (NoiseFit) was busy with it. Once the pause is over, try again
@@ -700,6 +778,8 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
             delay(50_000)
             if (!inForeground) return@launch
             Log.i(BandClient.TAG, "band was busy: retrying (attempt $retries)")
+            // Steps and heart rate too, not just vitals: a busy band can leave today's activity missing.
+            if (client.state.value is BandState.Connected) { syncJob?.join(); sync(force = true) }
             refreshVitals()
             analyzeSleep()
         }

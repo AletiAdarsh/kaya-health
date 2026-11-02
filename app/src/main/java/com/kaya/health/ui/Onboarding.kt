@@ -138,7 +138,7 @@ fun ConnectScreen(vm: AppViewModel, band: BandViewModel, onDone: () -> Unit) = a
             .verticalScroll(rememberScrollState()).padding(horizontal = 24.dp, vertical = 28.dp),
         verticalArrangement = Arrangement.spacedBy(16.dp),
     ) {
-        Text("Step 3 of 3", style = MaterialTheme.typography.labelLarge, color = Area.energy)
+        Text("Step 3 of 4", style = MaterialTheme.typography.labelLarge, color = Area.energy)
         Text("Connect", style = MaterialTheme.typography.displaySmall, fontWeight = FontWeight.Bold)
         Muted("Each one is optional and can be changed later in Settings. Kaya only uses them for what's written here.")
         Grant(Icons.Rounded.Bluetooth, Area.vitals, "Your band", "Bluetooth, to read your Noise REP directly. Turn the band on and keep it near the phone.", bt) {

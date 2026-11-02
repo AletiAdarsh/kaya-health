@@ -39,7 +39,8 @@ import kotlin.math.roundToInt
 
 /** Used both for first-time setup and the Profile tab. */
 @Composable
-fun ProfileScreen(vm: AppViewModel, firstRun: Boolean, onOpenCheck: () -> Unit = {}, onOpenBand: () -> Unit = {}, onConnectHealth: () -> Unit = {}) {
+fun ProfileScreen(vm: AppViewModel, firstRun: Boolean, onOpenCheck: () -> Unit = {}, onOpenBand: () -> Unit = {}, onConnectHealth: () -> Unit = {},
+    band: com.kaya.health.band.BandViewModel? = null, onTour: () -> Unit = {}) {
     val profile by vm.profile.collectAsState()
     val hc by vm.hc.collectAsState()
     val context = LocalContext.current
@@ -95,7 +96,7 @@ fun ProfileScreen(vm: AppViewModel, firstRun: Boolean, onOpenCheck: () -> Unit =
         verticalArrangement = Arrangement.spacedBy(14.dp),
     ) {
         if (firstRun) {
-            Text("Step 2 of 3", style = MaterialTheme.typography.labelLarge, color = Area.energy)
+            Text("Step 2 of 4", style = MaterialTheme.typography.labelLarge, color = Area.energy)
             Text("About you", style = MaterialTheme.typography.displaySmall)
             Muted("Used for the calorie and fitness maths. Everything here can be changed any time in Settings, and none of it leaves your phone.")
         } else PageHeader("Settings", "Your details, goal and devices", Area.energy, androidx.compose.material.icons.Icons.Rounded.Settings)
@@ -121,7 +122,7 @@ fun ProfileScreen(vm: AppViewModel, firstRun: Boolean, onOpenCheck: () -> Unit =
         }
 
         KCard {
-            CardTitle("About you")
+            CardTitle(if (firstRun) "Your body" else "About you")
             OutlinedTextField(age, { age = it.filter(Char::isDigit).take(3) }, label = { Text("Age") }, singleLine = true,
                 modifier = Modifier.fillMaxWidth(), keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number))
             OutlinedTextField(weight, { weight = it.filter { c -> c.isDigit() || c == '.' } }, label = { Text("Current weight (kg)") }, singleLine = true,
@@ -251,6 +252,7 @@ fun ProfileScreen(vm: AppViewModel, firstRun: Boolean, onOpenCheck: () -> Unit =
             },
         ) { Text(if (firstRun) "Next" else "Save") }
 
+        if (!firstRun && band != null) FeedbackCard(band, onTour)
         if (!firstRun) {
             RemindersCard()
             BackupCard(vm)

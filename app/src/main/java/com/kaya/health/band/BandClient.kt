@@ -398,6 +398,9 @@ class BandClient(private val context: Context, private val scope: CoroutineScope
     /** True while Kaya is giving the band a rest after it stopped answering. */
     val backingOff: Boolean get() = System.currentTimeMillis() < busyUntil
 
+    /** The user asked to try again: drop the busy pause. */
+    fun clearBackoff() { busyUntil = 0L; misses = 0 }
+
     /** Sends without waiting for a specific reply (e.g. start/stop streaming). */
     suspend fun tell(payload: ByteArray): Boolean = transferLock.withLock {
         try {

@@ -102,11 +102,7 @@ fun HomeScreen(vm: AppViewModel, band: BandViewModel, go: (Dest) -> Unit) {
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         card(1) {
             PageHeader(greeting, LocalDate.now().format(DateTimeFormatter.ofPattern("EEEE, d MMMM")), Area.energy) {
-                when (bandState) {
-                    is BandState.Connected -> Tag("Band ${battery?.percent?.let { "$it%" } ?: "on"}", Area.energy)
-                    is BandState.Connecting -> Tag("Band…", Area.mind)
-                    else -> androidx.compose.material3.TextButton(onClick = band::connectAndSync) { Text("Connect band", color = Area.vitals) }
-                }
+                BandStatusChip(band) { go(Dest.DEVICE) }
             }
         }
 
