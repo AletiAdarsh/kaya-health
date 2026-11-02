@@ -1,0 +1,19 @@
+.gradle/
+build/
+app/build/
+local.properties
+.idea/
+*.iml
+.kotlin/
+captures/
+*.apk
+tools/sleep_model/last_run.txt
+
+# Kept local only: research helper that reads another app's files, not needed to build Kaya
+tools/protoschema.py
+docs/vendor-schema/
+
+# Release signing: keep the key and its passwords out of the repo
+keystore.properties
+*.jks
+*.keystore
