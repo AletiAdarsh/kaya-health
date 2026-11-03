@@ -80,7 +80,7 @@ fun WelcomeScreen(vm: AppViewModel, onStart: () -> Unit) = androidx.compose.mate
         Point(Icons.Rounded.Bluetooth, Area.vitals, "Straight from your band", "Heart rate, sleep, steps and more, read directly over Bluetooth. Live heart rate every 2 seconds.")
         Point(Icons.Rounded.Science, Area.sleep, "Lab maths, not guesses", "Calories from lab equations, sleep from a model tested in a sleep lab, and every number explains itself.")
         Point(Icons.Rounded.Restaurant, Area.food, "Food, weight and habits", "A goal plan that adjusts every day, a food diary, Craving SOS and streaks.")
-        Point(Icons.Rounded.Lock, Area.body, "Private by design", "No account, no server, no internet permission. Your data stays on your phone and in backups you choose.")
+        Point(Icons.Rounded.Lock, Area.body, "Private by design", "No account, no server, no tracking. Your data stays on your phone and in backups you choose.")
         Spacer(Modifier.height(8.dp))
         Button(onClick = onStart, modifier = Modifier.fillMaxWidth().height(54.dp)) { Text("Get started", style = MaterialTheme.typography.titleMedium) }
         RestoreButton(vm, "I have a Kaya backup: restore it")

@@ -136,6 +136,8 @@ fun HomeScreen(vm: AppViewModel, band: BandViewModel, go: (Dest) -> Unit) {
             }
         }
 
+        card(3) { UpdateHomeCard() }
+
         // Slim motivation strip under the scores (tap to expand), so the scores stay at the top.
         if (m != null && profile.showMotivation) card(3) { KeepGoingCard(m, body.plan, profile, target, liveSteps) { go(Dest.BODY) } }
 

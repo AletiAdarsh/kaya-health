@@ -35,7 +35,7 @@ class PermissionsRationaleActivity : ComponentActivity() {
                     Text("Kaya and your health data", style = MaterialTheme.typography.headlineSmall, fontWeight = FontWeight.Bold)
                     Text("• Kaya reads steps, distance, heart rate, workouts, sleep, calories, weight and food from Health Connect, only to show them to you and calculate honest calorie estimates.")
                     Text("• Kaya writes only the weight and food entries you add yourself.")
-                    Text("• Everything stays on this phone. Kaya has no account, no server, and no internet permission.")
+                    Text("• Everything stays on this phone. Kaya has no account and no server, and never sends your data anywhere. Its only internet use is an optional, off-by-default check for app updates on GitHub.")
                     Text("• You can remove access any time in Health Connect settings.")
                     Button(onClick = { finish() }) { Text("Close") }
                 }

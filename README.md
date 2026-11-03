@@ -14,8 +14,9 @@ It is unofficial and not affiliated with Noise. It is not a medical device.
   heavier or less-trained body, roughly doubles walking calories. Kaya uses the ACSM walking/running equations
   (weight × speed × slope), Mifflin–St Jeor for resting burn and, after about two weeks, your **real** burn from
   logged food plus your weight trend.
-- **Your data stays yours:** no account, no server, and **no internet permission**. Kaya physically cannot upload
-  anything. Optional backups go only where you choose (see below).
+- **Your data stays yours:** no account, no server, no analytics. Nothing about you or your health ever leaves the
+  phone. The only time Kaya goes online is the **optional update check** (off until you say yes), which just asks
+  GitHub for the latest version number. Optional backups go only where you choose (see below).
 - **Honest numbers:** unreliable readings are labelled as such (for example jumpy night-time SpO2), and every
   score shows how it is calculated.
 
@@ -58,6 +59,15 @@ food entries can be deleted. Nothing is preset to anyone's personal numbers.
 **If you also use NoiseFit:** both apps can share the band, but syncing is slower while both are connected.
 The band deletes a finished day once any app confirms it has synced it. Kaya never does this, and it reads the
 band in the background every couple of hours and just before midnight so each day is saved first.
+
+## Updates
+
+On first open, Kaya asks whether it may check for updates. If you say yes, once a day it asks
+`api.github.com` for this project's latest release. That request contains nothing about you: no ID, no account,
+no health data. When there's a newer version, Home shows **Update**; Kaya downloads the APK from this repository's
+Releases, refuses it unless it's signed with the same key as the app you have, and Android asks you to confirm the
+install. Your data stays. Turn it on or off any time in **Settings → Updates**, or skip it and download new
+versions from [Releases](../../releases) yourself.
 
 ## Backups (optional, off by default)
 

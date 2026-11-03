@@ -252,6 +252,7 @@ fun ProfileScreen(vm: AppViewModel, firstRun: Boolean, onOpenCheck: () -> Unit =
             },
         ) { Text(if (firstRun) "Next" else "Save") }
 
+        if (!firstRun) UpdatesCard()
         if (!firstRun && band != null) FeedbackCard(band, onTour)
         if (!firstRun) {
             RemindersCard()

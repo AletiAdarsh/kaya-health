@@ -116,6 +116,7 @@ fun KayaApp(vm: AppViewModel = viewModel(), band: BandViewModel = viewModel()) {
     LifecycleResumeEffect(Unit) {
         band.onForeground()
         vm.refreshAll()
+        com.kaya.health.data.Updater.checkIfDue(vm.getApplication<android.app.Application>())
         // Leaving Kaya: give the band back so other apps (NoiseFit) can sync.
         onPauseOrDispose { band.releaseIfIdle() }
     }

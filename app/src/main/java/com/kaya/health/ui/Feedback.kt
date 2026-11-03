@@ -24,7 +24,7 @@ import com.kaya.health.band.BandViewModel
 const val ISSUES_URL = "https://github.com/AletiAdarsh/kaya-health/issues"
 
 /**
- * Feedback without breaking "no internet": Kaya only opens the browser on the project's public GitHub issue form,
+ * Feedback without Kaya sending anything itself: it only opens the browser on the project's public GitHub issue form,
  * pre-filled with technical details (no health data, names or IDs). The user sees and edits everything before sending.
  */
 @Composable
