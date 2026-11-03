@@ -293,6 +293,14 @@ class HealthRepository(private val context: Context) {
         return ((total - awake).toInt().takeIf { it > 0 } ?: return null) to src
     }
 
+    /** Sleep sessions any app (e.g. NoiseFit) wrote to Health Connect between [from] and [to], in local time. */
+    suspend fun sleepSessions(from: java.time.LocalDateTime, to: java.time.LocalDateTime): List<Pair<java.time.LocalDateTime, java.time.LocalDateTime>> {
+        if (!canRead(SleepSessionRecord::class)) return emptyList()
+        val zone = java.time.ZoneId.systemDefault()
+        return readAll(SleepSessionRecord::class, TimeRangeFilter.between(from, to))
+            .map { java.time.LocalDateTime.ofInstant(it.startTime, zone) to java.time.LocalDateTime.ofInstant(it.endTime, zone) }
+    }
+
     /** Sleep belonging to [date]: the night before (from 6 pm) plus any naps during the day. */
     suspend fun sleepEndingOn(date: LocalDate): SleepData? {
         if (!canRead(SleepSessionRecord::class)) return null

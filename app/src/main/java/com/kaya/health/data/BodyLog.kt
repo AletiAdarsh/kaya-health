@@ -55,6 +55,24 @@ class BodyLog(private val context: Context) {
         putString("nightRecs", o.toString())
     }
 
+    // ---- naps, keyed by the day they started: ["start|end", ...]
+    fun naps(date: LocalDate): List<Pair<java.time.LocalDateTime, java.time.LocalDateTime>> =
+        obj("naps").optJSONArray(date.toString())?.let { a ->
+            (0 until a.length()).mapNotNull { i ->
+                runCatching { a.getString(i).split("|").let { java.time.LocalDateTime.parse(it[0]) to java.time.LocalDateTime.parse(it[1]) } }.getOrNull()
+            }
+        } ?: emptyList()
+    /** Adds [found] to what's saved for [date] (overlaps merged). Never forgets a nap because a later pass saw less. */
+    fun addNaps(date: LocalDate, found: List<Pair<java.time.LocalDateTime, java.time.LocalDateTime>>): List<Pair<java.time.LocalDateTime, java.time.LocalDateTime>> {
+        val merged = com.kaya.health.engine.NapFinder.merge(naps(date), found)
+        if (found.isNotEmpty()) p.edit {
+            val o = obj("naps").put(date.toString(), org.json.JSONArray(merged.map { "${it.first}|${it.second}" }))
+            o.keys().asSequence().toList().filter { LocalDate.parse(it).isBefore(LocalDate.now().minusDays(400)) }.forEach { o.remove(it) }
+            putString("naps", o.toString())
+        }
+        return merged
+    }
+
     // ---- progress photos
     private val photoDir get() = File(context.filesDir, "progress").apply { mkdirs() }
     fun photos(): List<File> = photoDir.listFiles()?.filter { it.extension == "jpg" }?.sortedBy { it.name } ?: emptyList()

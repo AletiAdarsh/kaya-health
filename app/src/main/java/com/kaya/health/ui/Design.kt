@@ -376,3 +376,21 @@ fun Tag(text: String, accent: Color) {
         modifier = Modifier.clip(CircleShape).background(accent.copy(alpha = 0.14f)).padding(horizontal = 10.dp, vertical = 4.dp),
     )
 }
+
+/** "‹ Earlier · day · Later ›" switcher used by the Sleep and Activity pages. */
+@Composable
+fun DayStrip(date: java.time.LocalDate, accent: Color, onPick: (java.time.LocalDate) -> Unit) {
+    val today = java.time.LocalDate.now()
+    val title = when (date) {
+        today -> "Today"
+        today.minusDays(1) -> "Yesterday · " + date.format(java.time.format.DateTimeFormatter.ofPattern("EEE d MMM"))
+        else -> date.format(java.time.format.DateTimeFormatter.ofPattern("EEEE, d MMMM"))
+    }
+    androidx.compose.foundation.layout.Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+        androidx.compose.material3.TextButton(onClick = { onPick(date.minusDays(1)) }) { Text("‹ Earlier", color = accent) }
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+        androidx.compose.material3.TextButton(onClick = { onPick(date.plusDays(1)) }, enabled = date.isBefore(today)) {
+            Text("Later ›", color = if (date.isBefore(today)) accent else MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.4f))
+        }
+    }
+}

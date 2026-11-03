@@ -34,7 +34,13 @@ import androidx.compose.ui.unit.sp
 import com.kaya.health.band.BandViewModel
 import com.kaya.health.engine.SleepResult
 import com.kaya.health.engine.SleepStage
+import androidx.compose.foundation.clickable
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.setValue
 import java.time.Duration
+import java.time.LocalDate
 import java.time.LocalDateTime
 import java.time.format.DateTimeFormatter
 import kotlin.math.roundToInt
@@ -66,25 +72,40 @@ const val SLEEP_SCORE_INFO = "Out of 100:\n\n• Duration: up to 40 points, full
 fun SleepScreen(band: BandViewModel, vm: AppViewModel) {
     val ui by band.sleep.collectAsState()
     val nights by vm.nights.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val today = LocalDate.now()
+    var day by rememberSaveable { mutableStateOf(today.toEpochDay()) }
+    val date = LocalDate.ofEpochDay(day)
+    val isToday = date == today
     LaunchedEffect(ui.analysedAt) { vm.loadNights() }
 
     LaunchedEffect(Unit) { if (ui.result == null && !ui.loading) band.analyzeSleep() }
 
+    // An earlier day: the night that ended that morning (as analysed then) and the naps that started that day.
+    val saved = remember(day, ui.analysedAt) { if (isToday) null else com.kaya.health.data.SleepArchive(context).load(date) }
+    val dayNaps = remember(day, ui.analysedAt) { if (isToday) ui.naps else com.kaya.health.data.BodyLog(context).naps(date) }
+    val r = if (isToday) ui.result else saved?.result
+    val brAvg = if (isToday) ui.breathingAvg else saved?.breathingAvg
+    val brRange = if (isToday) ui.breathingRange else saved?.breathingRange
+    val napMin = com.kaya.health.engine.NapFinder.minutes(dayNaps)
+
     LazyColumn(contentPadding = PaddingValues(18.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         card(1) {
-            PageHeader("Sleep", ui.analysedAt?.let { "Last night · updated ${it.clock()}" } ?: "Last night", Area.sleep, MoonIcon) {
+            PageHeader("Sleep", if (isToday) ui.analysedAt?.let { "Last night · updated ${it.clock()}" } ?: "Last night" else "The night that ended this morning, and naps", Area.sleep, MoonIcon) {
                 InfoDot("How Kaya measures sleep", SLEEP_INFO)
-                if (ui.loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Area.sleep)
-                else androidx.compose.material3.TextButton(onClick = band::analyzeSleep) {
-                    Text(if (ui.result == null) "Analyse" else "Refresh", color = Area.sleep)
+                if (isToday) {
+                    if (ui.loading) CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp, color = Area.sleep)
+                    else androidx.compose.material3.TextButton(onClick = band::analyzeSleep) {
+                        Text(if (ui.result == null) "Analyse" else "Refresh", color = Area.sleep)
+                    }
                 }
             }
+            DayStrip(date, Area.sleep) { day = it.toEpochDay() }
         }
-        ui.message?.let { item { Panel { Muted(it) } } }
+        if (isToday) ui.message?.let { item { Panel { Muted(it) } } }
 
-        val r = ui.result
         if (r != null) {
-            card(2) { SummaryCard(r) }
+            card(2) { SummaryCard(r, if (isToday) "Last night" else "Night before") }
             card(3) { StageBreakdown(r) }
             card(4) {
                 Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
@@ -94,20 +115,39 @@ fun SleepScreen(band: BandViewModel, vm: AppViewModel) {
                     }
                     TileRow {
                         Tile("Sleeping HR", "${r.avgSleepingHr}", "bpm", "lowest ${r.lowestHr}", Area.vitals, null, Modifier.weight(1f))
-                        Tile("Breathing", ui.breathingAvg?.let { "%.0f".format(it) } ?: "–", "/min",
-                            ui.breathingRange?.let { (a, b) -> "range $a–$b" } ?: "no reading", Area.mind, null, Modifier.weight(1f))
+                        Tile("Breathing", brAvg?.let { "%.0f".format(it) } ?: "–", "/min",
+                            brRange?.let { (a, b) -> "range $a–$b" } ?: "no reading", Area.mind, null, Modifier.weight(1f))
                     }
-                    if (ui.naps.isNotEmpty()) TileRow {
-                        Tile("Naps", minutesText(ui.napMinutes), "", ui.naps.joinToString(", ") { "${it.first.format(shortClock)}–${it.second.format(shortClock)}" }, Area.sleep, null, Modifier.weight(1f))
-                        Tile("Total today", minutesText(r.asleepMin + ui.napMinutes), "", "night + naps", Area.sleep, null, Modifier.weight(1f))
-                    }
+                    if (dayNaps.isNotEmpty()) NapTiles(dayNaps, napMin, r.asleepMin.toLong(), isToday)
                 }
             }
             card(5) { HypnogramCard(r) }
-            card(6) { NightHeartCard(r, ui.readings) }
-            card(7) { WeekCard(nights) }
-            card(8) { ScoreCard(r) }
+            if (isToday) card(6) { NightHeartCard(r, ui.readings) }
+        } else if (!isToday) {
+            card(2) {
+                val n = nights[date]
+                Panel(accent = Area.sleep) {
+                    PanelLabel("Night before", MoonIcon, Area.sleep)
+                    if (n != null) {
+                        Figure(minutesText(n.minutes.toLong()), "asleep")
+                        Muted(if (n.fromOtherApp) "From Health Connect. Kaya didn't analyse this night itself, so there are no stages for it."
+                            else "Kaya saved only the total for this night (from before day-by-day detail was added).")
+                    } else Muted("No sleep recorded for this night.")
+                }
+                if (dayNaps.isNotEmpty()) NapTiles(dayNaps, napMin, n?.minutes?.toLong(), false)
+            }
         }
+        card(7) { WeekCard(nights, date) { day = it.toEpochDay() } }
+        if (r != null) card(8) { ScoreCard(r) }
+    }
+}
+
+@Composable
+private fun NapTiles(naps: List<Pair<LocalDateTime, LocalDateTime>>, napMin: Long, nightMin: Long?, isToday: Boolean) {
+    TileRow {
+        Tile(if (naps.size > 1) "Naps (${naps.size})" else "Nap", minutesText(napMin), "",
+            naps.joinToString(", ") { "${it.first.format(shortClock)}–${it.second.format(shortClock)}" }, Area.sleep, null, Modifier.weight(1f))
+        Tile(if (isToday) "Total today" else "Total that day", minutesText((nightMin ?: 0L) + napMin), "", "night + naps", Area.sleep, null, Modifier.weight(1f))
     }
 }
 
@@ -145,7 +185,7 @@ private fun StageBreakdown(r: SleepResult) {
 
 /** Last 7 nights: Kaya's own analysis, with nights it missed filled from Health Connect. */
 @Composable
-private fun WeekCard(nights: Map<java.time.LocalDate, AppViewModel.Night>) {
+private fun WeekCard(nights: Map<java.time.LocalDate, AppViewModel.Night>, selected: LocalDate, onPick: (LocalDate) -> Unit) {
     val today = java.time.LocalDate.now()
     val days = (6 downTo 0).map { today.minusDays(it.toLong()) }
     val values = days.map { (nights[it]?.minutes ?: 0).toDouble() }
@@ -155,9 +195,13 @@ private fun WeekCard(nights: Map<java.time.LocalDate, AppViewModel.Night>) {
         PanelLabel("Last 7 nights", null, Area.sleep, have.takeIf { it.isNotEmpty() }?.let { "avg ${minutesText(it.average().toLong())}" },
             info = "Nights Kaya analysed itself come from your band's raw data. Nights it missed (before you installed it, or when the band had already been synced elsewhere) are filled from Health Connect, as recorded by the app that wrote them there.")
         if (have.size < 2) { Muted("Fills in as nights are recorded (${have.size} so far)."); return@Panel }
-        GrowBars(values, Area.sleep, height = 90.dp, highlight = 6)
+        GrowBars(values, Area.sleep, height = 90.dp, highlight = days.indexOf(selected).takeIf { it >= 0 } ?: 6)
         Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
-            days.forEach { d -> Muted(d.dayOfWeek.name.take(1) + if (d in borrowed) "*" else "") }
+            days.forEach { d ->
+                Text(d.dayOfWeek.name.take(1) + if (d in borrowed) "*" else "", Modifier.clickable { onPick(d) }.padding(4.dp),
+                    style = MaterialTheme.typography.bodySmall, fontWeight = if (d == selected) FontWeight.Bold else FontWeight.Normal,
+                    color = if (d == selected) Area.sleep else MaterialTheme.colorScheme.onSurfaceVariant)
+            }
         }
         Row(Modifier.fillMaxWidth()) {
             Stat("best", minutesText(have.max().toLong()), Modifier.weight(1f))
@@ -169,11 +213,11 @@ private fun WeekCard(nights: Map<java.time.LocalDate, AppViewModel.Night>) {
 }
 
 @Composable
-private fun SummaryCard(r: SleepResult) {
+private fun SummaryCard(r: SleepResult, label: String = "Last night") {
     Panel(accent = Area.sleep) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
-                PanelLabel("Last night", MoonIcon, Area.sleep)
+                PanelLabel(label, MoonIcon, Area.sleep)
                 Figure(minutesText(r.asleepMin.toLong()), "asleep")
                 Muted("${r.bedtime.format(clockFmt)} → ${r.wake.format(clockFmt)}  ·  ${minutesText(r.inBedMin.toLong())} in bed")
             }

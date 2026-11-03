@@ -15,8 +15,8 @@ android {
         applicationId = "com.kaya.health"
         minSdk = 28          // Health Connect needs Android 9+
         targetSdk = 36
-        versionCode = 18
-        versionName = "1.1.0"
+        versionCode = 19
+        versionName = "1.1.1"
     }
 
     // Release signing reads keystore.properties (never committed). Without it, release builds are unsigned.

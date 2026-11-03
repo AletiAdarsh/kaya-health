@@ -66,6 +66,13 @@ data class SessionRow(
     val movementMeasured get() = est.speedKmh != null
 }
 
+/**
+ * Digesting food costs about 10% of what you eat. Food isn't always logged, so a day never counts less than
+ * [MIN_DIGESTION] kcal for it (spread across the day: half of it by noon).
+ */
+const val MIN_DIGESTION = 150.0
+fun digestionKcal(eaten: Double, dayFraction: Double = 1.0) = maxOf(0.10 * eaten, MIN_DIGESTION * dayFraction.coerceIn(0.0, 1.0))
+
 data class DayBurn(val resting: Double, val workouts: Double, val everydaySteps: Double, val digestion: Double) {
     val active get() = workouts + everydaySteps
     val total get() = resting + workouts + everydaySteps + digestion
@@ -337,6 +344,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         }
     }
 
+    /**
+     * A finished day's calories, the same way as today's but for the whole 24 hours: resting burn, steps outside
+     * workouts, counted workouts and digestion. Steps are the band's saved count or Health Connect's, whichever is higher.
+     */
+    suspend fun burnFor(date: LocalDate, bandSteps: Long?): Pair<DayBurn, Long>? = runCatching {
+        val hcSteps = runCatching { repo.dayActivity(date).steps }.getOrDefault(0L)
+        val steps = maxOf(hcSteps, bandSteps ?: 0L)
+        val start = date.atStartOfDay(zone).toInstant()
+        val sessions = runCatching { repo.sessions(start, date.plusDays(1).atStartOfDay(zone).toInstant()).map { row(it) } }.getOrDefault(emptyList())
+        val counted = sessions.filter { it.check.counted }
+        val eaten = runCatching { repo.food(date).sumOf { it.kcal } }.getOrDefault(0.0)
+        val everyday = max(0L, steps - counted.filter { it.movementMeasured }.sumOf { it.data.steps ?: 0L })
+        DayBurn(
+            resting = bmr(),
+            workouts = counted.sumOf { it.est.activeKcal },
+            everydaySteps = Calories.everydayStepsActiveKcal(everyday, weightKg(), _profile.value.heightCm),
+            digestion = digestionKcal(eaten),
+        ) to steps
+    }.onFailure { if (it is CancellationException) throw it }.getOrNull()
+
     private suspend fun loadToday() {
         _today.update { it.copy(loading = true, error = null) }
         try {
@@ -363,7 +390,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 resting = bmr() * minutesSoFar / 1440.0,
                 workouts = counted.sumOf { it.est.activeKcal },
                 everydaySteps = Calories.everydayStepsActiveKcal(everyday, weightKg(), p.heightCm),
-                digestion = 0.10 * eaten,
+                digestion = digestionKcal(eaten, minutesSoFar / 1440.0),
             )
             val kg = weightKg()
             val bmrDay = bmr()
@@ -390,7 +417,9 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 val ignored = sessions.size - counted.size
                 if (ignored > 0) add("   ($ignored recorded \"workout(s)\" not counted: no sign of real effort. See the workout cards.)")
-                if (eaten > 0) add("Digesting food: 10%% of %,.0f kcal eaten = %,.0f kcal".format(eaten, burn.digestion))
+                add(if (0.10 * eaten >= burn.digestion) "Digesting food: 10%% of %,.0f kcal eaten = %,.0f kcal".format(eaten, burn.digestion)
+                    else "Digesting food: at least %,.0f kcal a day even when food isn't logged (10%% of %,.0f kcal logged is less), so far %,.0f kcal"
+                        .format(MIN_DIGESTION, eaten, burn.digestion))
                 add(
                     "Total: %,.0f + %,.0f + %,.0f + %,.0f = %,.0f kcal"
                         .format(burn.resting, burn.everydaySteps, burn.workouts, burn.digestion, burn.total)
