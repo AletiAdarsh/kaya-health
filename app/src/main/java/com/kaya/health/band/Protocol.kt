@@ -86,7 +86,7 @@ object Commands {
     fun realtimeStart(): ByteArray = Wire.encode(1 to TYPE_HEALTH, 2 to REALTIME_START)
     fun realtimeStop(): ByteArray = Wire.encode(1 to TYPE_HEALTH, 2 to REALTIME_STOP)
 
-    // ---- Found by recording NoiseFit's Bluetooth traffic on the user's phone (btsnoop log, 1 Nov 2026) ----
+    // ---- Found by recording NoiseFit's Bluetooth traffic on a test phone (Android btsnoop log) ----
 
     const val TYPE_APP_STATE = 164
     const val TYPE_LIVE_SUMMARY = 165

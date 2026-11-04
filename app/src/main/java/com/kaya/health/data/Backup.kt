@@ -157,6 +157,7 @@ object Backup {
             PREFS.forEach { name -> File(prefsDir, "$name.xml").takeIf { it.exists() }?.let { put("prefs/$name.xml", it.readBytes()) } }
             File(context.filesDir, "band").listFiles()?.sortedBy { it.name }?.forEach { put("band/${it.name}", it.readBytes()) }
             File(context.filesDir, "progress").listFiles()?.sortedBy { it.name }?.forEach { put("progress/${it.name}", it.readBytes()) }
+            File(context.filesDir, "voice/why.m4a").takeIf { it.exists() }?.let { put("voice/why.m4a", it.readBytes()) }
             if (repo != null) runCatching {
                 val (food, weights) = repo.exportForBackup(Instant.now().minus(Duration.ofDays(3650)), Instant.now().plusSeconds(3600))
                 put("health.json", healthJson(food, weights).toString().toByteArray())
@@ -210,6 +211,10 @@ object Backup {
         val photoDir = File(context.filesDir, "progress").apply { mkdirs() }
         entries.filterKeys { it.startsWith("progress/") }.forEach { (name, bytes) ->
             val f = File(photoDir, File(name).name)
+            if (!f.exists()) f.writeBytes(bytes)
+        }
+        entries["voice/why.m4a"]?.let { bytes ->
+            val f = File(context.filesDir, "voice").apply { mkdirs() }.let { File(it, "why.m4a") }
             if (!f.exists()) f.writeBytes(bytes)
         }
         val bandDir = File(context.filesDir, "band").apply { mkdirs() }

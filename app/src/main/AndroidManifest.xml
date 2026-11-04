@@ -28,6 +28,8 @@
     <uses-permission android:name="android.permission.BLUETOOTH_CONNECT" />
     <!-- Optional reminders the user switches on in Settings -->
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- Optional: record your own message for the "Stop. Look." screen (kept on the phone) -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
     <!-- Optional, opt-in update check: asks github.com for the latest release and downloads it. Nothing else goes online. -->
     <uses-permission android:name="android.permission.INTERNET" />
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />

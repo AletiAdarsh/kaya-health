@@ -44,7 +44,7 @@ import kotlin.math.roundToInt
  * and Add food right here (search opens on Home, no need to leave the page).
  */
 @Composable
-fun NutritionCard(vm: AppViewModel, target: Double?, burnedSoFar: Double?, onOpenFood: () -> Unit) {
+fun NutritionCard(vm: AppViewModel, target: Double?, burnedSoFar: Double?, burnedRange: String? = null, onOpenFood: () -> Unit) {
     val food by vm.food.collectAsState()
     val profile by vm.profile.collectAsState()
     var searchOpen by remember { mutableStateOf(false) }
@@ -97,7 +97,7 @@ fun NutritionCard(vm: AppViewModel, target: Double?, burnedSoFar: Double?, onOpe
                 MealChip(AppViewModel.mealLabel(t), if (kcal > 0) kcal.kcal() else "–", kcal > 0)
             }
         }
-        burnedSoFar?.let { Muted("Burned so far today: ${it.kcal()} kcal") }
+        burnedSoFar?.let { Muted("Burned so far today: ${it.kcal()} kcal" + (burnedRange?.let { r -> " $r" } ?: "")) }
 
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             Button(

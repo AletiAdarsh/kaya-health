@@ -204,6 +204,7 @@ fun KayaApp(vm: AppViewModel = viewModel(), band: BandViewModel = viewModel()) {
                             targetKcal = today.targetKcal ?: body.targetKcal, eatenToday = today.eatenKcal, currentKg = body.latestKg,
                             onLogFood = { f -> vm.addFood(f.name, f.kcal, f.protein, AppViewModel.mealTypeNow(), f.carbs, f.fat, f.fiber) },
                             onClose = { com.kaya.health.MainActivity.pendingOpen.value = null },
+                            vm = vm,
                         )
                     }
                 }

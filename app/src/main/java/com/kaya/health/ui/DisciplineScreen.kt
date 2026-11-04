@@ -151,6 +151,7 @@ fun DisciplineScreen(vm: AppViewModel) {
         targetKcal = todayUi.targetKcal ?: body.targetKcal, eatenToday = todayUi.eatenKcal, currentKg = body.latestKg,
         onLogFood = { f -> vm.addFood(f.name, f.kcal, f.protein, AppViewModel.mealTypeNow(), f.carbs, f.fat, f.fiber) },
         onClose = { sos = false; bump() },
+        vm = vm,
     )
 }
 

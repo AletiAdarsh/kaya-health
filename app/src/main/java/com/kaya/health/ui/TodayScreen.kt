@@ -113,6 +113,7 @@ private fun BurnCard(ui: TodayUi, burn: DayBurn) {
             InfoDot("How calories are worked out", CALORIE_INFO)
         }
         BigNumber(burn.total.kcal(), "kcal")
+        Muted("${burn.rangeText} likely range")
         Spacer(Modifier.size(4.dp))
         LineItem("Resting (body running itself)", burn.resting.kcal())
         LineItem("Workouts (extra)", burn.workouts.kcal())

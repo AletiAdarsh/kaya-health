@@ -47,7 +47,7 @@ fun WalksCard(band: BandViewModel, weightKg: Double, heightCm: Double, restingHr
     val version by band.walksVersion.collectAsState()
     val days by band.days.collectAsState()
     var justDone by remember { mutableStateOf<Walk?>(null) }
-    val walks = remember(version, days) { band.walksOn(LocalDate.now(), restingHr, age) }
+    val walks = remember(version, days, restingHr) { band.walksOn(LocalDate.now(), restingHr, age) }
 
     Panel(accent = Area.activity) {
         PanelLabel("Walks", Icons.AutoMirrored.Rounded.DirectionsWalk, Area.activity, walks.takeIf { it.isNotEmpty() }?.let { "${it.size} today" })

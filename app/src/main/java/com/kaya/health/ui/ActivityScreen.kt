@@ -89,7 +89,12 @@ fun ActivityScreen(vm: AppViewModel, band: BandViewModel, go: (Dest) -> Unit) {
         card(3) {
             androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
                 TileRow {
-                    Tile("Distance", day?.distanceM?.let { "%.2f".format(it / 1000.0) } ?: "–", "km", "from steps", Area.activity, null, Modifier.weight(1f))
+                    // The band fills in distance an hour at a time, so it lags after a walk; steps × stride doesn't.
+                    val distM = listOfNotNull(
+                        day?.distanceM?.toDouble(),
+                        day?.steps?.let { it * com.kaya.health.engine.Calories.strideM(profile.heightCm, running = false) },
+                    ).maxOrNull()
+                    Tile("Distance", distM?.let { "%.2f".format(it / 1000.0) } ?: "–", "km", "from steps", Area.activity, null, Modifier.weight(1f))
                     Tile("Walking", day?.activeMinutes?.toString() ?: "–", "min", "on your feet", Area.activity, null, Modifier.weight(1f))
                 }
                 val hr = day?.hrReadings?.map { it.second }?.filter { it in 30..230 } ?: emptyList()
@@ -151,6 +156,7 @@ fun ActivityScreen(vm: AppViewModel, band: BandViewModel, go: (Dest) -> Unit) {
                 PanelLabel("Calories burned", Icons.Rounded.LocalFireDepartment, Area.food, info = CALORIE_INFO)
                 Figure(b?.total?.kcal() ?: "–", if (isToday) "kcal so far" else "kcal that day")
                 b?.let {
+                    Muted("${it.rangeText} likely range")
                     LineItem("Resting", it.resting.kcal())
                     LineItem("Walking & workouts", it.active.kcal())
                     LineItem("Digesting food", it.digestion.kcal())
@@ -178,7 +184,7 @@ private fun HourBars(values: IntArray) {
 
 private fun hourName(h: Int) = when { h == 0 -> "12 am"; h < 12 -> "$h am"; h == 12 -> "12 pm"; else -> "${h - 12} pm" }
 
-const val CALORIE_INFO = "Resting: your basal metabolic rate (Mifflin–St Jeor: 10 × weight + 6.25 × height − 5 × age + 5 for men, −161 for women), spread across the day.\n\nDigesting food: 10% of what you log, and never less than 150 kcal a day (so days you don't log food still count it).\n\nWalking: the ACSM walking equation. Oxygen used = 0.1 × speed (m/min) + 1.8 × speed × slope + 3.5, turned into calories at 5 kcal per litre of oxygen, times your weight. Speed comes from your band's steps and your stride (0.415 × height).\n\nWorkouts: the same lab equations from distance and time, or average MET values when there's no distance.\n\nHeart rate is not used to guess calories: heart-rate formulas overestimate a lot for heavier bodies and in heat or stress."
+const val CALORIE_INFO = "Resting: your basal metabolic rate (Mifflin–St Jeor: 10 × weight + 6.25 × height − 5 × age + 5 for men, −161 for women), spread across the day.\n\nDigesting food: 10% of what you log, and never less than 150 kcal a day (so days you don't log food still count it).\n\nWalking: the ACSM walking equation. Oxygen used = 0.1 × speed (m/min) + 1.8 × speed × slope + 3.5, turned into calories at 5 kcal per litre of oxygen, times your weight. Speed comes from your band's steps and your stride (0.415 × height).\n\nWorkouts: the same lab equations from distance and time, or average MET values when there's no distance.\n\nHeart rate is not used to guess calories: heart-rate formulas overestimate a lot for heavier bodies and in heat or stress.\n\nThe range in brackets: no formula knows your exact burn. The resting formula is within 10% for about 3 in 4 people, and steps miss standing, fidgeting and carrying things, so the range runs a little below Kaya's number and further above it. Your weight trend against your food log is the real test."
 
 const val EFFORT_INFO = "Effort (0–100) adds three parts:\n\n• Steps: up to 50 points for reaching today's share of your weekly step goal.\n\n• Walking minutes: up to 30 points for 30 minutes on your feet (an hour counts as walking minutes from about 100 steps a minute).\n\n• Heart-rate zone time: up to 20 points for 20 minutes with your heart rate in the fat-burn zone or above."
 

@@ -77,13 +77,12 @@ import java.time.format.DateTimeFormatter
 
 private val hm = DateTimeFormatter.ofPattern("h:mm a")
 
-/** Your usual daily value for a vital: average of up to 14 earlier saved days (lowest for resting HR). Null until there are 2+ days. */
+/** Your usual daily value for a vital: average of up to 14 earlier saved days. Null until there are 2+ days. */
 fun usualOf(band: BandViewModel, v: Vital): Double? =
-    band.history(v).filter { it.date != LocalDate.now() }.take(14).takeIf { it.size >= 2 }
-        ?.let { days -> if (v.metric == Vital.RESTING_HR.metric) days.map { it.min }.average() else days.map { it.avg }.average() }
+    band.history(v).filter { it.date != LocalDate.now() }.take(14).takeIf { it.size >= 2 }?.map { it.avg }?.average()
 
 fun vitalColor(v: Vital): Color = when (v.metric) {
-    Vital.HEART.metric, Vital.RESTING_HR.metric -> Area.vitals
+    Vital.HEART.metric -> Area.vitals
     Vital.SPO2.metric -> Area.mind
     Vital.STRESS.metric -> Area.activity
     Vital.HRV.metric -> Area.energy
@@ -247,7 +246,7 @@ fun HeartHero(band: BandViewModel, live: com.kaya.health.band.LiveUi, enabled: B
         hr.groupBy { it.first.withSecond(0).withNano(0).withMinute(it.first.minute / 5 * 5) }
             .map { (t, l) -> t to l.map { it.second }.sorted()[l.size / 2] }.sortedBy { it.first }
     }
-    val resting = vitals[Vital.RESTING_HR.metric]?.minOfOrNull { it.second }
+    val resting = remember(hrRaw) { band.restingHr(LocalDate.now()) }
     val pulse = rememberInfiniteTransition(label = "pulse")
     val beatMs = (60_000 / (live.bpm ?: 70).coerceIn(40, 200)) / 2
     val beat by pulse.animateFloat(1f, 1.16f, infiniteRepeatable(tween(beatMs), RepeatMode.Reverse), label = "beat")

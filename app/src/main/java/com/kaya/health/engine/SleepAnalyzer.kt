@@ -87,6 +87,10 @@ object SleepAnalyzer {
          * awake quietly from light sleep. Stages still come from the model.
          */
         bandWindow: Pair<LocalDateTime, LocalDateTime>? = null,
+        /** Stretches the band itself saw you awake (gaps in its breathing log); forced to Awake. */
+        awakeSpans: List<Pair<LocalDateTime, LocalDateTime>> = emptyList(),
+        /** 5-minute slots the band logged as asleep (breathing readings): never called Awake by heart rate alone. */
+        bandAsleep: List<LocalDateTime> = emptyList(),
     ): SleepResult? {
         val start = from.truncatedTo(ChronoUnit.HOURS)
         val n = (Duration.between(start, to).toMinutes() / EPOCH_MIN).toInt()
@@ -153,6 +157,10 @@ object SleepAnalyzer {
         if (bw != null) {
             first = slotOf(bw.first); last = (slotOf(bw.second) - 1).coerceAtLeast(first)
             all = SleepModel.classify(hr, steps, first, last, wakeThreshold = 0.65)
+            // Heart rate alone can't tell lying still awake (pain, worry) from light sleep; the band's motion-based
+            // detection can. Where it saw you awake for 20+ minutes, you were awake.
+            for (t in bandAsleep) for (k in slotOf(t) until slotOf(t.plusMinutes(5))) if (k in first..last && all[k] == SleepStage.AWAKE) all[k] = SleepStage.LIGHT
+            for ((x, y) in awakeSpans) for (k in slotOf(x) until slotOf(y)) if (k in first..last) all[k] = SleepStage.AWAKE
         } else {
             first = roughA?.let { it * 10 } ?: (nSlots * 0.3).toInt()
             last = roughB?.let { minOf(nSlots - 1, it * 10 + 9) } ?: (nSlots * 0.85).toInt()

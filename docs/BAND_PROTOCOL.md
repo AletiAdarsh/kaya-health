@@ -55,7 +55,7 @@ Fetched with type 113 like the others. "blob" = one byte per slot in field 2 (no
 | 17 | scalars `2=76 3=10184` | unknown |
 | 18 | 288 B blob | 0/5 flags scattered through the night, possibly movement |
 | **19** | 288 B blob | **breathing rate (16–27/min), recorded only while the band thinks you're asleep** → the band's own motion-based sleep window (within ~10 min of NoiseFit's) |
-| 23 | 24 B hourly | 69 → 63 overnight, likely resting-HR estimate |
+| 23 | 24 B hourly | **Battery %** each hour (NoiseFit's SDK calls it `battery_data`); not resting HR. Kaya works out resting HR from series 2 instead |
 | 25 | 6 × {1:0, 2:<300 B>} | all zeros so far |
 | 26 | status 0 | nothing |
 | 27 | 2,880 B blob | all zeros; beat-to-beat data comes as `*_RRI_Data.bin.txt` files (type 4097) instead |

@@ -61,13 +61,10 @@ data class Vital(
             "Wrist skin temperature every 5 minutes overnight. Skin runs cooler than body (core) temperature.",
             "Usually 32–36 °C at the wrist. The trend matters more than the number; a jump can mean illness.", false, 25.0..42.0,
         )
-        val RESTING_HR = Vital(
-            23, "Resting heart rate", "bpm", 0,
-            "The band's hourly resting heart-rate estimate.",
-            "60–100 bpm typical. Falling over weeks = getting fitter.", false, 30.0..150.0,
-        )
+        // Series 23 is the band's hourly battery level, not a resting heart rate (NoiseFit's SDK names it battery_data).
+        // Resting heart rate is worked out from the heart-rate log instead: engine/RestingHr.kt.
 
-        val ALL = listOf(HEART, SPO2, STRESS, HRV, BREATHING, SKIN_TEMP, RESTING_HR)
+        val ALL = listOf(HEART, SPO2, STRESS, HRV, BREATHING, SKIN_TEMP)
 
         /** Time-stamped readings from a stored/fetched series. */
         fun readings(v: Vital, s: Series): List<Pair<LocalDateTime, Double>> {

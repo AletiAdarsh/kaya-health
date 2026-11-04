@@ -33,7 +33,7 @@ It is unofficial and not affiliated with Noise. It is not a medical device.
 | Body | Lose, gain or maintain; your target date next to a realistic one; milestones; BMI, BMR, TDEE; fitness age (HUNT VO2max model) with what brings it down |
 | Mind | Four breathing patterns with live heart rate, stress stats, 5-4-3-2-1 grounding |
 | Discipline | Habits with streaks and a heatmap, a morning if-then plan, mood, focus timer, 30-day challenges, your "why" and rewards, a weekly review, and a share card for an accountability partner |
-| Craving SOS | A 10-minute reset: breathing, the honest calorie cost, a smarter swap, your why; logs triggers and learns when cravings usually hit, then warns you beforehand |
+| Stop. Look. (Craving SOS) | Opens with a voice message you recorded to yourself, your latest progress photo next to your goal, and what this food and this week cost in days. Then a 10-minute reset: breathing, a smarter swap, your why. Logs triggers and learns when cravings usually hit |
 | Meal ideas | "What can I eat?" plates that fit the calories and protein you have left, from a built-in offline food list |
 | Body extras | Water tracker, waist measurements, private progress photos, and plain-language notes on water weight and plateaus |
 | Widget | Calories left, steps, water (+1 glass) and a one-tap Craving SOS on your home screen |
@@ -54,6 +54,8 @@ food entries can be deleted. Nothing is preset to anyone's personal numbers.
 2. Open it on your phone and allow "install unknown apps" for your browser or file manager.
 3. Open Kaya: a welcome screen, a short "about you" form, then one screen to allow Bluetooth (your band),
    Health Connect (food and weight) and notifications (reminders). Each is optional and explained.
+   The microphone is asked for only if you choose to record a message to yourself for Stop. Look.; the
+   recording stays on your phone (and in your backup, if you turn backups on).
 4. Turn the band on near the phone. Kaya finds it by itself.
 
 **If you also use NoiseFit:** both apps can share the band, but syncing is slower while both are connected.

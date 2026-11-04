@@ -18,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.flow.update
 import kotlinx.coroutines.isActive
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.sync.withLock
 import java.time.Instant
 import java.time.LocalDate
@@ -86,6 +87,7 @@ data class SleepUi(
 class BandViewModel(app: Application) : AndroidViewModel(app) {
     val client = BandClient(app, viewModelScope)
     private val store = BandStore(app)
+    private val bandFiles = BandFiles(app)
     val state: StateFlow<BandState> = client.state
     val log: StateFlow<List<String>> = client.log
 
@@ -365,11 +367,13 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
      * Debug builds: dump the raw layout of every metric the band lists that Kaya doesn't decode yet
      * (looking for per-minute movement for sleep). Logged under tag KayaProbe.
      */
-    private suspend fun probeUnknownMetrics() {
+    private suspend fun probeUnknownMetrics(only: List<Int>? = null) {
         val today = LocalDate.now()
         val known = setOf(0, 2, 4, 21, 22)
-        val metrics = lastIndex?.filter { it.first == today }?.map { it.second }?.filter { it !in known }?.sorted() ?: return
+        val metrics = only ?: lastIndex?.filter { it.first == today }?.map { it.second }?.filter { it !in known }?.sorted() ?: return
+        Log.i("KayaProbe", "probing $metrics")
         for (m in metrics) {
+            // Read-only request (113). Never 115.
             val reply = client.ask(Commands.series(Commands.TYPE_SERIES, today.atStartOfDay(), m), Commands.TYPE_SERIES, matches = { r ->
                 Decode.status(r) != null || (Wire.parseOrNull(Wire.bytes(r, 9))?.any { f ->
                     f.bytes?.let { b -> Wire.int(Wire.bytes(b, 1), 2)?.toInt() == m } == true
@@ -457,15 +461,20 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     fun recoveryInputs(): RecoveryInputs {
         val today = LocalDate.now()
         val night = { l: List<Pair<LocalDateTime, Double>> -> l.filter { it.first.toLocalDate() == today && it.first.hour < 8 }.map { it.second } }
-        val rhr = night(_vitals.value[Vital.RESTING_HR.metric] ?: emptyList()).minOrNull()
-            ?: _days.value[today]?.hrReadings?.filter { it.first.hour < 8 }?.map { it.second.toDouble() }?.sorted()?.let { it.getOrNull(it.size / 10) }
+        val rhr = restingHr(today)
         val hrv = night(_vitals.value[Vital.HRV.metric] ?: emptyList()).takeIf { it.isNotEmpty() }?.average()
-        val rhrBase = history(Vital.RESTING_HR).filter { it.date != today }.take(14).map { it.min }.takeIf { it.size >= 2 }?.average()
+        val rhrBase = restingHrHistory().filter { it.first != today }.take(14).map { it.second }.takeIf { it.size >= 2 }?.average()
         val hrvBase = history(Vital.HRV).filter { it.date != today }.take(14).map { it.avg }.takeIf { it.size >= 2 }?.average()
         return RecoveryInputs(rhr, rhrBase, hrv, hrvBase)
     }
 
-    /** One day's steps per hour from Kaya's saved copy. */
+    /** Resting heart rate for [date]: the lowest 30-minute average in that day's heart-rate log (usually asleep). */
+    fun restingHr(date: LocalDate): Double? = savedBandDay(date)?.hrReadings?.let { com.kaya.health.engine.RestingHr.fromReadings(it) }
+
+    /** Resting heart rate for each saved day (up to 60), newest first. */
+    fun restingHrHistory(): List<Pair<LocalDate, Double>> =
+        store.dates(Commands.METRIC_HEART_RATE).take(60).mapNotNull { d -> restingHr(d)?.let { d to it } }
+
     /** Any day's steps and heart rate as saved on the phone (live copy for today and yesterday). */
     fun savedBandDay(date: LocalDate): BandDay? = _days.value[date] ?: run {
         val hr = store.load(date, Commands.METRIC_HEART_RATE)
@@ -538,7 +547,9 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
                 // With the band's window, stop an hour after it says you woke: later daytime readings would otherwise
                 // shift the heart-rate baseline, and last night's numbers would change every time Kaya re-analysed.
                 val hrOnlyTo = if (bandWindow == null) minOf(to, today.atTime(11, 0)) else minOf(to, bandWindow.second.plusHours(1))
-                val r = com.kaya.health.engine.SleepAnalyzer.analyze(readings, steps, from, hrOnlyTo, bandWindow)
+                val awakeSpans = bandWindow?.let { w -> com.kaya.health.engine.SleepWindow.awakeGaps(inWindow.map { it.first }, w, minGapMin = 60) } ?: emptyList()
+                Log.i(BandClient.TAG, "band saw you awake: $awakeSpans")
+                val r = com.kaya.health.engine.SleepAnalyzer.analyze(readings, steps, from, hrOnlyTo, bandWindow, awakeSpans, inWindow.map { it.first })
                 Log.i(
                     BandClient.TAG,
                     "sleep: readings=${readings.size} window=$from..$to → " + (r?.let {
@@ -758,6 +769,7 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
         // Kaya too. Save any series that's new or more complete than Kaya's copy, before the band deletes the day.
         viewModelScope.launch {
             client.payloads.collect { p ->
+                if (Decode.type(p)?.toInt() == 4097) { runCatching { bandFiles.capture(p) }.onFailure { Log.w(BandClient.TAG, "file chunk", it) }; return@collect }
                 if (Decode.type(p)?.toInt() != Commands.TYPE_SERIES) return@collect
                 val series = runCatching { Decode.allSeries(p) }.getOrDefault(emptyList())
                     .filter { s -> s.samples.any { it > 0 } || s.hourly.isNotEmpty() }
@@ -785,6 +797,18 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     /** Kaya is on screen again. */
     fun onForeground() {
         inForeground = true; retries = 0
+        lingerJob?.cancel()
+        probeMetrics?.let { ms ->
+            probeMetrics = null
+            viewModelScope.launch {
+                Log.i("KayaProbe", "probe requested: $ms")
+                kotlinx.coroutines.delay(8_000) // let the normal connect + sync start first
+                val ok = kotlinx.coroutines.withTimeoutOrNull(60_000) { client.state.first { it is BandState.Connected } } != null
+                Log.i("KayaProbe", "connected=$ok")
+                if (4097 in ms) bandFiles.dump()
+                if (ok) fetchLock.withLock { probeUnknownMetrics(ms.filter { it != 4097 }) }
+            }
+        }
         // Kaya let go of the band when it went to the background; take it back so the header and data are live.
         val st = client.state.value
         if (hasPermissions(getApplication()) && st !is BandState.Connected && st !is BandState.Connecting) connectAndSync()
@@ -844,10 +868,23 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
         retryJob?.cancel()
         if (_live.value.running || _walk.value.running) return
         if (client.state.value is BandState.Connected || client.state.value is BandState.Connecting) {
+            // Mornings, until last night's beat-to-beat file has been seen: keep listening for 5 minutes, so when
+            // NoiseFit syncs (it asks the band for the file) Kaya saves a copy as it passes. Kaya never asks for it.
+            val h = java.time.LocalTime.now().hour
+            if (h in 5..13 && !bandFiles.hasNightFile(LocalDate.now())) {
+                Log.i(BandClient.TAG, "app in background: listening 5 min for last night's file")
+                lingerJob?.cancel()
+                lingerJob = viewModelScope.launch {
+                    delay(5 * 60_000)
+                    if (!inForeground && !_live.value.running && !_walk.value.running) { Log.i(BandClient.TAG, "releasing the band"); client.disconnect() }
+                }
+                return
+            }
             Log.i(BandClient.TAG, "app in background: releasing the band")
             client.disconnect()
         }
     }
+    private var lingerJob: kotlinx.coroutines.Job? = null
 
     override fun onCleared() {
         BandSync.viaApp = null
@@ -856,6 +893,8 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
 
     companion object {
         const val LIVE_TRIGGER_MS = 2_000L
+        /** Set from MainActivity's "kaya_probe" extra; consumed on the next foreground. */
+        @Volatile var probeMetrics: List<Int>? = null
 
         /** Bluetooth permissions needed for the current Android version. */
         fun requiredPermissions(): Array<String> =

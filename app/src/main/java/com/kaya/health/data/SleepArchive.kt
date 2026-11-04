@@ -27,6 +27,7 @@ class SleepArchive(context: Context) {
             .put("bed", r.bedtime.toString()).put("wake", r.wake.toString())
             .put("stages", r.epochs.joinToString("") { it.stage.name.take(1) })
             .put("epoch0", r.epochs.firstOrNull()?.start?.toString() ?: r.bedtime.toString())
+            .put("epochSec", r.epochs.zipWithNext().firstOrNull()?.let { (a, b) -> java.time.Duration.between(a.start, b.start).seconds } ?: 30)
             .put("asleep", r.asleepMin).put("inBed", r.inBedMin).put("awakenings", r.awakenings)
             .put("hr", r.avgSleepingHr).put("low", r.lowestHr).put("awakeHr", r.awakeHr)
             .put("score", r.score).put("coverage", r.dataCoverage)
@@ -43,7 +44,8 @@ class SleepArchive(context: Context) {
         val j = all().optJSONObject(wakeDay.toString()) ?: return null
         val byLetter = SleepStage.entries.associateBy { it.name.take(1) }
         val t0 = LocalDateTime.parse(j.getString("epoch0"))
-        val epochs = j.getString("stages").mapIndexedNotNull { i, c -> byLetter[c.toString()]?.let { SleepEpoch(t0.plusMinutes(5L * i), null, it) } }
+        val step = j.optLong("epochSec", 30)
+        val epochs = j.getString("stages").mapIndexedNotNull { i, c -> byLetter[c.toString()]?.let { SleepEpoch(t0.plusSeconds(step * i), null, it) } }
         val mins = j.getJSONObject("min").let { m -> SleepStage.entries.associateWith { m.optInt(it.name, 0) } }
         val parts = j.getJSONArray("parts").let { a -> (0 until a.length()).map { a.getJSONArray(it).let { x -> x.getString(0) to x.getInt(1) } } }
         Day(

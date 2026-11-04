@@ -22,11 +22,19 @@ class MainActivity : ComponentActivity() {
     override fun onNewIntent(intent: android.content.Intent) {
         super.onNewIntent(intent)
         intent.getStringExtra(EXTRA_OPEN)?.let { pendingOpen.value = it }
+        probeFrom(intent)
+    }
+
+    /** Research: `am start ... --es kaya_probe 26,16` logs those band records' raw layout (read-only, tag KayaProbe). */
+    private fun probeFrom(i: android.content.Intent?) {
+        i?.getStringExtra("kaya_probe")?.split(",")?.mapNotNull { it.trim().toIntOrNull() }?.takeIf { it.isNotEmpty() }
+            ?.let { com.kaya.health.band.BandViewModel.probeMetrics = it }
     }
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         if (savedInstanceState == null) intent?.getStringExtra(EXTRA_OPEN)?.let { pendingOpen.value = it }
+        probeFrom(intent)
         enableEdgeToEdge()
         setContent {
             KayaTheme {

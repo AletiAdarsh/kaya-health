@@ -95,6 +95,7 @@ private val TRIGGERS = listOf("Stressed", "Bored", "Tired", "Hungry", "Social", 
 fun CravingSos(
     weightKg: Double, heightCm: Double, targetKcal: Double?, eatenToday: Double, currentKg: Double?,
     onLogFood: (FoodItem) -> Unit, onClose: () -> Unit,
+    vm: AppViewModel? = null,
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
     val store = remember { DisciplineStore(context) }
@@ -121,14 +122,18 @@ fun CravingSos(
             verticalArrangement = Arrangement.spacedBy(14.dp),
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Craving SOS", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
+                Text("Stop. Look.", style = MaterialTheme.typography.headlineMedium, modifier = Modifier.weight(1f))
                 TextButton(onClick = onClose) { Text("Close") }
             }
 
             when {
                 finished != null -> Done(finished!!, store, onClose)
                 !started -> {
-                    Text("What are you craving?", style = MaterialTheme.typography.titleMedium)
+                    // First the reality: your own voice, your photo, your numbers. Then decide.
+                    VoiceMessagePanel(autoPlay = true)
+                    vm?.let { PhotoVsGoalPanel(it) }
+                    vm?.let { TruthPanel(it, food?.kcal) }
+                    Text("What are you about to eat?", style = MaterialTheme.typography.titleMedium)
                     FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                         QUICK.mapNotNull { n -> FoodDb.ALL.firstOrNull { it.name == n } }.forEach { f ->
                             FilterChip(selected = food == f, onClick = { food = f }, label = { Text(f.name.substringBefore(" (").substringBefore(" /")) })
@@ -143,9 +148,9 @@ fun CravingSos(
                     }
                     Button(onClick = { started = true }, modifier = Modifier.fillMaxWidth().height(54.dp),
                         colors = ButtonDefaults.buttonColors(containerColor = Area.activity, contentColor = Color(0xFF1E0B00))) {
-                        Text("Give it 10 minutes", style = MaterialTheme.typography.titleMedium)
+                        Text("Lock it for 10 minutes", style = MaterialTheme.typography.titleMedium)
                     }
-                    Muted("Cravings rise and fall like a wave, usually within 10–15 minutes. Ride it out, then decide.")
+                    Muted("The urge rises and falls like a wave, usually within 10–15 minutes. Lock it for 10, then decide with a clear head.")
                 }
                 else -> {
                     // Countdown ring with a breathing pulse: in 4 s, out 6 s.

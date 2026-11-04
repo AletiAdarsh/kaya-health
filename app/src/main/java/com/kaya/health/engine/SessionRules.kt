@@ -7,7 +7,7 @@ data class SessionCheck(val counted: Boolean, val reason: String, val userDecide
 
 /**
  * Bands auto-detect workouts from wrist movement, and bus, auto-rickshaw and scooter rides look a lot like
- * cycling. (Seen on the user's phone: three NoiseFit "cycling" sessions at 1–3 am on a sleeper bus, which
+ * cycling. (Seen in testing: three NoiseFit "cycling" sessions at 1–3 am on a sleeper bus, which
  * NoiseFit's own app doesn't even list as workouts.) Kaya counts a session only when there's evidence of effort.
  */
 object SessionRules {

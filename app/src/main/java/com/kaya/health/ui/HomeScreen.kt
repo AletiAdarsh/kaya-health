@@ -96,6 +96,7 @@ fun HomeScreen(vm: AppViewModel, band: BandViewModel, go: (Dest) -> Unit) {
         targetKcal = target, eatenToday = today.eatenKcal, currentKg = body.latestKg,
         onLogFood = { f -> vm.addFood(f.name, f.kcal, f.protein, AppViewModel.mealTypeNow(), f.carbs, f.fat, f.fiber) },
         onClose = { sos = false },
+        vm = vm,
     )
 
     androidx.compose.foundation.layout.Box {
@@ -150,7 +151,7 @@ fun HomeScreen(vm: AppViewModel, band: BandViewModel, go: (Dest) -> Unit) {
 
         // ---- calories today
         // ---- nutrition: calories, protein, meals, and Add food right here
-        card(4) { NutritionCard(vm, target, today.burn?.total) { go(Dest.FOOD) } }
+        card(4) { NutritionCard(vm, target, today.burn?.total, today.burn?.rangeText) { go(Dest.FOOD) } }
         card(4) { MealIdeasCard(vm, target) }
         card(4) { WaterCard(body.latestKg ?: profile.fallbackWeightKg, profile.waterGoalGlasses) }
         card(4) { DisciplineStrip(onSos = { sos = true }, onOpen = { go(Dest.DISCIPLINE) }) }

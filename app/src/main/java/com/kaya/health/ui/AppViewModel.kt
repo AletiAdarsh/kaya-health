@@ -76,6 +76,8 @@ fun digestionKcal(eaten: Double, dayFraction: Double = 1.0) = maxOf(0.10 * eaten
 data class DayBurn(val resting: Double, val workouts: Double, val everydaySteps: Double, val digestion: Double) {
     val active get() = workouts + everydaySteps
     val total get() = resting + workouts + everydaySteps + digestion
+    /** The likely range, shown in brackets after the number, e.g. "(1,210–1,430)". */
+    val rangeText: String get() = com.kaya.health.engine.Calories.burnRange(total, resting).let { (lo, hi) -> "(${lo.kcal()}–${hi.kcal()})" }
 }
 
 data class TodayUi(

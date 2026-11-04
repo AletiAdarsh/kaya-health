@@ -171,6 +171,16 @@ object Calories {
         return SessionEstimate(total, active, null, dist, "Rough average for this activity (%.1f METs), no distance available".format(met), working)
     }
 
+    /**
+     * Likely range around a day's burn. The resting formula (Mifflin–St Jeor) is within ±10% for about 3 in 4
+     * people with obesity, and step counting misses movement that isn't steps (standing, fidgeting, carrying).
+     * So the range reaches a little below (−5% of resting) and further above (+15% of resting), rounded to 10s.
+     */
+    fun burnRange(total: Double, resting: Double): Pair<Double, Double> {
+        fun r10(x: Double) = Math.round(x / 10.0) * 10.0
+        return r10(total - 0.05 * resting) to r10(total + 0.15 * resting)
+    }
+
     /** Extra calories from everyday steps outside workouts. Net walking cost ≈ 0.5 kcal per kg per km. */
     fun everydayStepsActiveKcal(steps: Long, weightKg: Double, heightCm: Double): Double {
         val km = steps * strideM(heightCm, running = false) / 1000.0

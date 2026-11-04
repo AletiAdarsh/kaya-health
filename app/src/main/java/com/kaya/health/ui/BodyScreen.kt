@@ -494,8 +494,7 @@ private fun FitnessAgeCard(vm: AppViewModel, band: com.kaya.health.band.BandView
         // Resting heart rate: your average while asleep (the study measured it seated, which is usually a little
         // higher, never the night's lowest dip). Falls back to the band's own resting estimate.
         val rhr = sleep.result?.avgSleepingHr?.takeIf { it in 35..120 }?.toDouble()
-            ?: band.history(com.kaya.health.band.Vital.RESTING_HR).take(7).takeIf { it.isNotEmpty() }?.map { it.avg }?.average()
-            ?: band.recoveryInputs().restingHr
+            ?: band.restingHrHistory().take(7).takeIf { it.isNotEmpty() }?.map { it.second }?.average()
         // Exercise sessions in the last 14 days: recorded walks, else days with 7,000+ steps.
         val since = java.time.LocalDate.now().minusDays(13)
         val walks = com.kaya.health.band.WalkStore(context).recorded().filter { !it.start.toLocalDate().isBefore(since) && it.minutes >= 10 }

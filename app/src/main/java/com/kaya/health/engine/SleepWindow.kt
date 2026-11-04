@@ -75,4 +75,37 @@ object SleepWindow {
         }
         return best.copy(first = start)
     }
+
+    /**
+     * Awake stretches inside the night, from gaps in the band's breathing log. The band logs breathing (one value per
+     * [stepMin] minutes) only while its own sleep detection says you're asleep, so a gap of [minGapMin]+ minutes means
+     * the band saw you awake. Gaps split by a short blip of "sleep" (up to [bridgeMin] minutes) count as one stretch:
+     * lying awake for two hours, the band often dozes in and out for 5 minutes. Checked against the band's own
+     * firmware log and a tester's own account of a night with a long awake stretch.
+     */
+    fun awakeGaps(
+        times: List<LocalDateTime>,
+        window: Pair<LocalDateTime, LocalDateTime>,
+        stepMin: Long = 5,
+        minGapMin: Long = 20,
+        bridgeMin: Long = 10,
+    ): List<Pair<LocalDateTime, LocalDateTime>> {
+        val (a, b) = window
+        val pts = times.filter { !it.isBefore(a) && it.isBefore(b) }.sorted().distinct()
+        if (pts.isEmpty()) return emptyList()
+        val gaps = ArrayList<Pair<LocalDateTime, LocalDateTime>>()
+        // Only gaps between readings: before the first one the band is still deciding you're asleep (Kaya's window
+        // already starts earlier on purpose), and the night ends at the last one.
+        for ((x, y) in pts.zipWithNext()) {
+            val end = x.plusMinutes(stepMin)
+            if (y.isAfter(end)) gaps += end to y
+        }
+        val merged = ArrayList<Pair<LocalDateTime, LocalDateTime>>()
+        for (g in gaps) {
+            val l = merged.lastOrNull()
+            if (l != null && java.time.Duration.between(l.second, g.first).toMinutes() <= bridgeMin) merged[merged.size - 1] = l.first to g.second
+            else merged += g
+        }
+        return merged.filter { java.time.Duration.between(it.first, it.second).toMinutes() >= minGapMin }
+    }
 }
