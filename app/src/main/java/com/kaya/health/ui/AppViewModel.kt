@@ -95,10 +95,6 @@ data class TodayUi(
     val weightFromHealthConnect: Boolean = false,
     val sources: List<String> = emptyList(),
     val hasNoiseData: Boolean = false,
-    /** Apps that supplied today's steps (friendly names). */
-    val stepSources: List<String> = emptyList(),
-    /** False when NoiseFit didn't share the band's step count, so steps are the phone's own count. */
-    val bandStepsShared: Boolean = true,
     /** Earliest heart-rate reading NoiseFit shared today. Readings before this didn't reach Kaya. */
     val noiseHrFrom: Instant? = null,
     /** Today's calorie total written out step by step. */
@@ -281,13 +277,14 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     fun loadNights() {
         viewModelScope.launch {
-            val own = com.kaya.health.data.BodyLog(getApplication()).nights()
+            val log = com.kaya.health.data.BodyLog(getApplication())
+            val own = log.nights()
             val today = LocalDate.now(zone)
             val out = HashMap<LocalDate, Night>()
             for (d in 0L..13L) {
                 val day = today.minusDays(d)
                 val mine = own[day]
-                if (mine != null) { out[day] = Night(mine, false); continue }
+                if (mine != null) { out[day] = Night(mine + log.morningSleepMin(day), false); continue }
                 runCatching { repo.nightAsleepMin(day) }.onFailure { if (it is CancellationException) throw it }
                     .getOrNull()?.let { (min, _) -> out[day] = Night(min, true) }
             }
@@ -348,11 +345,12 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
     /**
      * A finished day's calories, the same way as today's but for the whole 24 hours: resting burn, steps outside
-     * workouts, counted workouts and digestion. Steps are the band's saved count or Health Connect's, whichever is higher.
+     * workouts, counted workouts and digestion. Steps are the band's own count only (never the phone's).
      */
     suspend fun burnFor(date: LocalDate, bandSteps: Long?): Pair<DayBurn, Long>? = runCatching {
-        val hcSteps = runCatching { repo.dayActivity(date).steps }.getOrDefault(0L)
-        val steps = maxOf(hcSteps, bandSteps ?: 0L)
+        val viaNoiseFit = runCatching { repo.bandStepsViaNoiseFit(date, date.plusDays(1)) }
+            .onFailure { if (it is CancellationException) throw it }.getOrDefault(emptyMap())
+        val steps = maxOf(bandSteps ?: 0L, bandStepsOn(date, viaNoiseFit))
         val start = date.atStartOfDay(zone).toInstant()
         val sessions = runCatching { repo.sessions(start, date.plusDays(1).atStartOfDay(zone).toInstant()).map { row(it) } }.getOrDefault(emptyList())
         val counted = sessions.filter { it.check.counted }
@@ -366,15 +364,26 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         ) to steps
     }.onFailure { if (it is CancellationException) throw it }.getOrNull()
 
+    /**
+     * The band's step count for [date]: what Kaya read from the band, or the band's count as NoiseFit copied it into
+     * Health Connect ([viaNoiseFit]), whichever is further along. Never the phone's own pedometer: it sits on a desk
+     * (440 vs the band's 1,782 on a tester's day) and Health Connect mixes it in for hours NoiseFit hasn't synced.
+     */
+    private fun bandStepsOn(date: LocalDate, viaNoiseFit: Map<LocalDate, Long> = emptyMap()): Long =
+        maxOf(bandStore.load(date, 0)?.totals?.get("steps") ?: 0L, viaNoiseFit[date] ?: 0L)
+
     private suspend fun loadToday() {
         _today.update { it.copy(loading = true, error = null) }
         try {
             val date = LocalDate.now(zone)
             val now = Instant.now()
-            // NoiseFit doesn't write steps to Health Connect, so the band's own count (saved by Kaya) is used when it's higher.
+            // Steps and distance come from the band only. The phone's own step counter (via Health Connect) isn't used:
+            // it misses steps when the phone sits on a desk and can add some on a bike or car ride.
+            val viaNoiseFit = runCatching { repo.bandStepsViaNoiseFit(date, date.plusDays(1)) }
+                .onFailure { if (it is CancellationException) throw it }.getOrDefault(emptyMap())
             val act = repo.dayActivity(date).let { a ->
-                val band = bandStore.load(date, 0)?.totals?.get("steps") ?: 0L
-                if (band > a.steps) a.copy(steps = band) else a
+                val band = bandStore.load(date, 0)?.totals
+                a.copy(steps = bandStepsOn(date, viaNoiseFit), distanceM = band?.get("distance_m")?.takeIf { it > 0 }?.toDouble())
             }
             val raw = repo.dataCheck(date)
             val sessions = repo.sessions(date.atStartOfDay(zone).toInstant(), now).map { row(it, act.hrAvg?.toDouble()) }
@@ -428,11 +437,8 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 )
             }
             val allSources = (act.sources + sessions.map { it.data.source } + listOfNotNull(sleep?.source))
-            val stepPkgs = raw.steps.map { it.source }
             _today.value = TodayUi(
                 working = working,
-                stepSources = stepPkgs.map(::friendly).distinct(),
-                bandStepsShared = stepPkgs.isEmpty() || stepPkgs.any { DataCheck.isNoise(it) },
                 noiseHrFrom = raw.heartRate.filter { DataCheck.isNoise(it.source) }.minOfOrNull { it.first },
                 loading = false,
                 loaded = true,
@@ -468,14 +474,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
 
             val p = _profile.value
             val kg = latest ?: p.fallbackWeightKg
-            // Steps per finished day over the last 2 weeks: the band's own counts (NoiseFit doesn't write steps to
-            // Health Connect), or Health Connect's if that day is higher. More walking → higher burn → earlier date.
-            val hcSteps = repo.dailySteps(today.minusDays(14), today).toMap()
-            val bandSteps = (1L..14L).associate { d ->
-                val date = today.minusDays(d)
-                date to (bandStore.load(date, 0)?.totals?.get("steps") ?: 0L)
-            }
-            val steps = (hcSteps.keys + bandSteps.keys).map { maxOf(hcSteps[it] ?: 0L, bandSteps[it] ?: 0L) }.filter { it > 0 }
+            // Steps per finished day over the last 2 weeks, from the band. More walking → higher burn → earlier date.
+            val viaNoiseFit = runCatching { repo.bandStepsViaNoiseFit(today.minusDays(14), today.plusDays(1)) }
+                .onFailure { if (it is CancellationException) throw it }.getOrDefault(emptyMap())
+            val bandSteps = (1L..14L).associate { d -> today.minusDays(d).let { it to bandStepsOn(it, viaNoiseFit) } }
+            val steps = bandSteps.values.filter { it > 0 }
             val avgSteps = if (steps.isEmpty()) 6000.0 else steps.average()
             val formula = Calories.bmr(kg, p.heightCm, p.age, p.sex) * 1.15 +
                 Calories.everydayStepsActiveKcal(avgSteps.toLong(), kg, p.heightCm)
@@ -513,11 +516,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                 val target = plan?.dailyTarget ?: p.intakeKcal?.toDouble() ?: est.tdee
                 val onTarget = intake.filter { it.kcal <= target * 1.05 }.map { it.date }.toSet()
                 val todayFood = repo.food(today)
-                val todayBand = bandStore.load(today, 0)?.totals?.get("steps") ?: 0L
-                val stepsByDay = (0L..13L).associate { d ->
-                    val date = today.minusDays(d)
-                    date to maxOf(hcSteps[date] ?: 0L, bandSteps[date] ?: 0L, if (d == 0L) todayBand else 0L)
-                }
+                val stepsByDay = (0L..13L).associate { d -> today.minusDays(d).let { it to bandStepsOn(it, viaNoiseFit) } }
                 val before = dayWeights.filter { it.date.isBefore(today) }.minOfOrNull { it.kg }
                 val todayKg = dayWeights.filter { it.date == today }.minOfOrNull { it.kg }
                 val startKg = p.goalStartWeightKg ?: currentKg

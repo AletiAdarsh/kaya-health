@@ -136,12 +136,6 @@ private fun MovementCard(ui: TodayUi) {
             Stat("steps", "%,d".format(a.steps), Modifier.weight(1f))
             Stat("km", a.distanceM?.let { "%.2f".format(it / 1000) } ?: "–", Modifier.weight(1f))
         }
-        if (!ui.bandStepsShared) {
-            Text(
-                "These are your phone's steps (${ui.stepSources.joinToString()}), not the band's.",
-                color = MaterialTheme.colorScheme.secondary, style = MaterialTheme.typography.bodyMedium,
-            )
-        }
     }
 }
 

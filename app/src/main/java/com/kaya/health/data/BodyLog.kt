@@ -73,6 +73,24 @@ class BodyLog(private val context: Context) {
         return merged
     }
 
+    /** Forgets naps saved for [date] that overlap [night]: they turned out to be part of the night. */
+    fun dropNaps(date: LocalDate, night: Pair<java.time.LocalDateTime, java.time.LocalDateTime>) {
+        val keep = naps(date).filterNot { it.first.isBefore(night.second) && it.second.isAfter(night.first) }
+        if (keep.size != naps(date).size) p.edit {
+            putString("naps", obj("naps").put(date.toString(), org.json.JSONArray(keep.map { "${it.first}|${it.second}" })).toString())
+        }
+    }
+
+    /**
+     * Minutes of sleep to add to the saved night for [wakeDay]: naps that started within an hour of waking, before
+     * 11 am. Nights saved before Kaya joined these to the night (the band sometimes stops logging after an early
+     * wake-up) still count them this way.
+     */
+    fun morningSleepMin(wakeDay: LocalDate): Int {
+        val wake = nightRecords().firstOrNull { it.wakeDay == wakeDay }?.wake ?: return 0
+        return com.kaya.health.engine.NapFinder.minutes(com.kaya.health.engine.SleepWindow.morningContinuation(wake, naps(wakeDay))).toInt()
+    }
+
     // ---- progress photos
     private val photoDir get() = File(context.filesDir, "progress").apply { mkdirs() }
     fun photos(): List<File> = photoDir.listFiles()?.filter { it.extension == "jpg" }?.sortedBy { it.name } ?: emptyList()

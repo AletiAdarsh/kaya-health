@@ -464,7 +464,11 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
         val rhr = restingHr(today)
         val hrv = night(_vitals.value[Vital.HRV.metric] ?: emptyList()).takeIf { it.isNotEmpty() }?.average()
         val rhrBase = restingHrHistory().filter { it.first != today }.take(14).map { it.second }.takeIf { it.size >= 2 }?.average()
-        val hrvBase = history(Vital.HRV).filter { it.date != today }.take(14).map { it.avg }.takeIf { it.size >= 2 }?.average()
+        // Like for like: tonight's HRV against earlier nights' averages (the all-day average runs higher, so comparing a
+        // night with it made every night look a little "below usual").
+        val hrvBase = com.kaya.health.data.BodyLog(getApplication()).nightRecords().filter { it.wakeDay != today }.takeLast(14)
+            .mapNotNull { it.hrv }.takeIf { it.size >= 2 }?.average()
+            ?: history(Vital.HRV).filter { it.date != today }.take(14).map { it.avg }.takeIf { it.size >= 2 }?.average()
         return RecoveryInputs(rhr, rhrBase, hrv, hrvBase)
     }
 
@@ -547,12 +551,14 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
                 // With the band's window, stop an hour after it says you woke: later daytime readings would otherwise
                 // shift the heart-rate baseline, and last night's numbers would change every time Kaya re-analysed.
                 val hrOnlyTo = if (bandWindow == null) minOf(to, today.atTime(11, 0)) else minOf(to, bandWindow.second.plusHours(1))
-                val awakeSpans = bandWindow?.let { w -> com.kaya.health.engine.SleepWindow.awakeGaps(inWindow.map { it.first }, w, minGapMin = 60) } ?: emptyList()
+                // Gaps of 20+ minutes in the band's breathing log are times it saw you awake. Each one checked so far
+                // matched a wake-up in the band's own firmware log (e.g. 3:28–3:50 on a tester's night).
+                val awakeSpans = bandWindow?.let { w -> com.kaya.health.engine.SleepWindow.awakeGaps(inWindow.map { it.first }, w) } ?: emptyList()
                 Log.i(BandClient.TAG, "band saw you awake: $awakeSpans")
-                val r = com.kaya.health.engine.SleepAnalyzer.analyze(readings, steps, from, hrOnlyTo, bandWindow, awakeSpans, inWindow.map { it.first })
+                val r0 = com.kaya.health.engine.SleepAnalyzer.analyze(readings, steps, from, hrOnlyTo, bandWindow, awakeSpans, inWindow.map { it.first })
                 Log.i(
                     BandClient.TAG,
-                    "sleep: readings=${readings.size} window=$from..$to → " + (r?.let {
+                    "sleep: readings=${readings.size} window=$from..$to → " + (r0?.let {
                         "bed=${it.bedtime} wake=${it.wake} asleep=${it.asleepMin} inBed=${it.inBedMin} stages=${it.minutes} " +
                             "awakenings=${it.awakenings} hr avg=${it.avgSleepingHr} low=${it.lowestHr} awakeHr=${it.awakeHr} " +
                             "coverage=${"%.2f".format(it.dataCoverage)} score=${it.score} ${it.scoreParts}"
@@ -560,7 +566,7 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
                 )
                 // Naps, yesterday and today: everything outside the main nights (last night, and yesterday's morning).
                 val bodyLog = com.kaya.health.data.BodyLog(getApplication())
-                val lastNight = (bandWindow ?: r?.let { it.bedtime to it.wake })
+                val lastNight = (bandWindow ?: r0?.let { it.bedtime to it.wake })
                 val yWake = bodyLog.nightRecords().firstOrNull { it.wakeDay == yesterday }?.wake ?: yesterday.atTime(10, 0)
                 val napFrom = yWake.plusMinutes(30)
                 val napTo = LocalDateTime.now()
@@ -572,12 +578,38 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
                 val fromHc = runCatching { health.sleepSessions(napFrom, napTo) }.getOrDefault(emptyList())
                     .filter { (a, b) -> nights.none { (x, y) -> a.isBefore(y) && b.isAfter(x) } }
                     .filter { java.time.Duration.between(it.first, it.second).toMinutes() in com.kaya.health.engine.NapFinder.MIN_NAP..240 }
-                val sleepingHr = r?.avgSleepingHr ?: bodyLog.nightRecords().lastOrNull()?.avgHr
+                val sleepingHr = r0?.avgSleepingHr ?: bodyLog.nightRecords().lastOrNull()?.avgHr
                 val fromHr = if (fromBand.isEmpty() && fromHc.isEmpty() && sleepingHr != null)
                     com.kaya.health.engine.NapFinder.fromHeart(readings, steps, sleepingHr, napFrom, napTo, nights) else emptyList()
                 Log.i(BandClient.TAG, "naps: band=$fromBand healthConnect=$fromHc heart=$fromHr (outside $nights)")
                 val found = com.kaya.health.engine.NapFinder.merge(fromBand, fromHc, fromHr)
-                val naps = bodyLog.addNaps(today, found.filter { it.first.toLocalDate() == today })
+                // Back to sleep after an early wake-up is the same night, not a nap. After getting up the band sometimes
+                // decides it's off your wrist and logs no sleep at all (4:29–8:02 on a tester's night), so heart rate
+                // at or below the night's sleeping level also counts. Sleep starting within an hour of waking, before
+                // 11 am, joins the night; the gap in between is awake time.
+                val base = r0
+                val r = if (base == null || lastNight == null) base else run {
+                    val lateHr = com.kaya.health.engine.NapFinder.fromHeart(
+                        // Clearly below the night's sleeping average (limit = average − 3) and 45+ minutes long: lying in
+                        // bed awake for half an hour after the alarm isn't more sleep.
+                        readings, steps, base.avgSleepingHr - 9, lastNight.second, minOf(LocalDateTime.now(), today.atTime(11, 0)), emptyList(),
+                    ).filter { java.time.Duration.between(it.first, it.second).toMinutes() >= 45 }
+                    val more = com.kaya.health.engine.SleepWindow.morningContinuation(lastNight.second, com.kaya.health.engine.NapFinder.merge(found, lateHr))
+                    if (more.isEmpty()) base else {
+                        val end = more.last().second
+                        val gaps = (listOf(lastNight.second to lastNight.second) + more).zipWithNext { a, b -> a.second to b.first }
+                            .filter { (a, b) -> java.time.Duration.between(a, b).toMinutes() >= 5 }
+                        val inside = more.flatMap { p -> com.kaya.health.engine.SleepWindow.awakeGaps(inWindow.map { it.first }.filter { !it.isBefore(p.first) && it.isBefore(p.second) }, p) }
+                        Log.i(BandClient.TAG, "back to sleep after waking: $more, awake in between: $gaps")
+                        com.kaya.health.engine.SleepAnalyzer.analyze(
+                            readings, steps, from, minOf(to, end.plusHours(1)), base.bedtime to end, awakeSpans + gaps + inside, inWindow.map { it.first },
+                        ) ?: base
+                    }
+                }
+                val night = r?.let { it.bedtime to it.wake }
+                fun notInNight(n: Pair<LocalDateTime, LocalDateTime>) = night == null || !(n.first.isBefore(night.second) && n.second.isAfter(night.first))
+                night?.let { bodyLog.dropNaps(today, it) }
+                val naps = bodyLog.addNaps(today, found.filter { it.first.toLocalDate() == today && notInNight(it) }).filter(::notInNight)
                 val yesterdayNaps = bodyLog.addNaps(yesterday, found.filter { it.first.toLocalDate() == yesterday })
                 if (r != null) runCatching {
                     val log = com.kaya.health.data.BodyLog(getApplication())

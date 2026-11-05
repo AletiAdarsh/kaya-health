@@ -17,6 +17,7 @@ object SleepWindow {
         hr: List<Pair<LocalDateTime, Int>>,
         sampleMin: Long = 5,
         maxGapMin: Long = 120,
+        rejoinMin: Long = 40,
     ): Pair<LocalDateTime, LocalDateTime>? {
         if (breath.isEmpty()) return null
         // 1. Stretches of logged sleep, small holes (≤ 30 min) closed.
@@ -59,7 +60,17 @@ object SleepWindow {
             cur = if (quiet(cur.second, r.first)) cur.first to r.second else { chains += cur; r }
         }
         chains += cur
-        val best = chains.maxByOrNull { Duration.between(it.first, it.second) } ?: return null
+        val longest = chains.maxByOrNull { Duration.between(it.first, it.second) } ?: return null
+
+        // 2b. Getting up in the night (the bathroom, a glass of water) and falling asleep again within [rejoinMin] minutes is
+        //     still the same night, even with steps. The gap stays in the window; awakeGaps() marks it awake.
+        var lo = chains.indexOf(longest); var hi = lo
+        fun near(x: Pair<LocalDateTime, LocalDateTime>, y: Pair<LocalDateTime, LocalDateTime>) =
+            Duration.between(x.second, y.first).toMinutes() <= rejoinMin
+        fun longEnough(c: Pair<LocalDateTime, LocalDateTime>) = Duration.between(c.first, c.second).toMinutes() >= 20
+        while (hi + 1 < chains.size && near(chains[hi], chains[hi + 1]) && longEnough(chains[hi + 1])) hi++
+        while (lo > 0 && near(chains[lo - 1], chains[lo]) && longEnough(chains[lo - 1])) lo--
+        val best = chains[lo].first to chains[hi].second
 
         // 3. The band starts its log a little after you drop off. Step back (up to 30 min) while the heart rate
         //    is already at its sleeping level and you aren't moving.
@@ -74,6 +85,30 @@ object SleepWindow {
             }
         }
         return best.copy(first = start)
+    }
+
+    /**
+     * Sleep stretches that continue the night after an early wake-up: each starts within [withinMin] minutes of the
+     * previous one ending (the first, of [wake]) and before [before] o'clock, and lasts [minLen]+ minutes. Clipped so
+     * none starts before [wake].
+     */
+    fun morningContinuation(
+        wake: LocalDateTime,
+        sleeps: List<Pair<LocalDateTime, LocalDateTime>>,
+        withinMin: Long = 60,
+        before: java.time.LocalTime = java.time.LocalTime.of(11, 0),
+        minLen: Long = 20,
+    ): List<Pair<LocalDateTime, LocalDateTime>> {
+        val out = ArrayList<Pair<LocalDateTime, LocalDateTime>>()
+        var end = wake
+        for ((a, b) in sleeps.sortedBy { it.first }) {
+            if (!b.isAfter(end)) continue
+            val s = maxOf(a, end)
+            if (Duration.between(end, s).toMinutes() > withinMin || !s.toLocalTime().isBefore(before) || s.toLocalDate() != wake.toLocalDate()) break
+            if (Duration.between(s, b).toMinutes() < minLen) continue
+            out += s to b; end = b
+        }
+        return out
     }
 
     /**

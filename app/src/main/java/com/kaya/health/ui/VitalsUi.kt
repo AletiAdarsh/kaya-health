@@ -81,6 +81,26 @@ private val hm = DateTimeFormatter.ofPattern("h:mm a")
 fun usualOf(band: BandViewModel, v: Vital): Double? =
     band.history(v).filter { it.date != LocalDate.now() }.take(14).takeIf { it.size >= 2 }?.map { it.avg }?.average()
 
+/**
+ * Vitals the band measures (or that mean most) during sleep. Their tiles show last night's average, like NoiseFit,
+ * not the latest single reading: one reading as you wake (breathing 13 when the night averaged 17) says little.
+ */
+val NIGHT_VITALS = setOf(Vital.HRV.metric, Vital.BREATHING.metric, Vital.SKIN_TEMP.metric)
+
+/** Last night's readings of [v] (between bedtime and wake), or null when there's no analysed night. */
+fun lastNightReadings(band: BandViewModel, v: Vital, night: Pair<LocalDateTime, LocalDateTime>?): List<Pair<LocalDateTime, Double>>? {
+    val (a, b) = night ?: return null
+    val today = LocalDate.now()
+    return (band.savedDay(v, today.minusDays(1)) + band.savedDay(v, today))
+        .filter { !it.first.isBefore(a) && it.first.isBefore(b) }.sortedBy { it.first }.takeIf { it.isNotEmpty() }
+}
+
+/** Your usual night average of [v]: up to 14 earlier nights Kaya analysed. Null until there are 2+. */
+fun usualNight(context: android.content.Context, v: Vital): Double? =
+    com.kaya.health.data.BodyLog(context).nightRecords().filter { it.wakeDay != LocalDate.now() }.takeLast(14)
+        .mapNotNull { when (v.metric) { Vital.HRV.metric -> it.hrv; Vital.BREATHING.metric -> it.breathing; Vital.SKIN_TEMP.metric -> it.skinTemp; else -> null } }
+        .takeIf { it.size >= 2 }?.average()
+
 fun vitalColor(v: Vital): Color = when (v.metric) {
     Vital.HEART.metric -> Area.vitals
     Vital.SPO2.metric -> Area.mind
@@ -112,7 +132,13 @@ fun levelColor(l: Level, accent: Color): Color = when (l) {
 fun VitalsSection(band: BandViewModel, onOpen: (Vital) -> Unit) {
     val vitals by band.vitals.collectAsState()
     val loading by band.vitalsLoading.collectAsState()
-    val usual = remember(vitals) { Vital.ALL.associate { it.metric to usualOf(band, it) } }
+    val sleep by band.sleep.collectAsState()
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val night = sleep.result?.let { it.bedtime to it.wake }
+    val nightly = remember(vitals, night) { NIGHT_VITALS.associateWith { m -> Vital.ALL.first { it.metric == m }.let { lastNightReadings(band, it, night) } } }
+    val usual = remember(vitals, night) {
+        Vital.ALL.associate { v -> v.metric to (if (nightly[v.metric] != null) usualNight(context, v) ?: usualOf(band, v) else usualOf(band, v)) }
+    }
     Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Text("All vitals", style = MaterialTheme.typography.titleLarge, fontWeight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
@@ -125,7 +151,10 @@ fun VitalsSection(band: BandViewModel, onOpen: (Vital) -> Unit) {
         }
         Vital.ALL.filter { it.metric != Vital.HEART.metric }.chunked(2).forEach { pair ->
             Row(Modifier.fillMaxWidth().height(IntrinsicSize.Min), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-                pair.forEach { v -> VitalTile(v, vitals[v.metric], usual[v.metric], Modifier.weight(1f).fillMaxHeight()) { onOpen(v) } }
+                pair.forEach { v ->
+                    val n = nightly[v.metric]
+                    VitalTile(v, n ?: vitals[v.metric], usual[v.metric], Modifier.weight(1f).fillMaxHeight(), lastNight = n != null) { onOpen(v) }
+                }
                 if (pair.size == 1) Spacer(Modifier.weight(1f))
             }
         }
@@ -144,7 +173,7 @@ fun VitalsSection(band: BandViewModel, onOpen: (Vital) -> Unit) {
 }
 
 @Composable
-private fun VitalTile(v: Vital, readings: List<Pair<LocalDateTime, Double>>?, usual: Double?, modifier: Modifier, onClick: () -> Unit) {
+private fun VitalTile(v: Vital, readings: List<Pair<LocalDateTime, Double>>?, usual: Double?, modifier: Modifier, lastNight: Boolean = false, onClick: () -> Unit) {
     val accent = vitalColor(v)
     val values = readings?.map { it.second } ?: emptyList()
     val status = VitalInsights.status(v.metric, values, usual)
@@ -170,6 +199,7 @@ private fun VitalTile(v: Vital, readings: List<Pair<LocalDateTime, Double>>?, us
                 when {
                     values.isEmpty() -> "–"
                     noisy -> "?"
+                    lastNight -> v.format(values.average())
                     else -> v.format(v.headline(readings!!)!!)
                 },
                 style = MaterialTheme.typography.headlineMedium, fontWeight = FontWeight.Bold,
@@ -184,6 +214,7 @@ private fun VitalTile(v: Vital, readings: List<Pair<LocalDateTime, Double>>?, us
                 readings == null -> "Loading…"
                 values.isEmpty() -> if (v.metric in listOf(Vital.SPO2.metric, Vital.BREATHING.metric, Vital.SKIN_TEMP.metric)) "Measured overnight" else "No reading today yet"
                 noisy -> "${values.size} readings, ${v.format(values.min())}–${v.format(values.max())}%: too jumpy to trust"
+                lastNight -> "last night's average" + (usual?.let { " · usual ${v.format(it)}" } ?: "")
                 v.showMedian -> "typical of ${values.size} today"
                 usual != null -> "usual ${v.format(usual)} · ${readings.last().first.format(hm)}"
                 else -> "latest ${readings.last().first.format(hm)}"

@@ -139,6 +139,9 @@ data class DataCheck(
     }
 }
 
+/** NoiseFit's app id: the only app whose Health Connect steps Kaya accepts (they're the band's count). */
+const val NOISEFIT_PACKAGE = "com.noisefit"
+
 /**
  * Everything Kaya knows about your body comes through Health Connect, Android's shared on-device
  * health database. Other apps (NoiseFit, Samsung Health, Strava…) write into it, and Kaya reads with your permission.
@@ -204,13 +207,21 @@ class HealthRepository(private val context: Context) {
         )
     }
 
-    suspend fun dailySteps(from: LocalDate, toExclusive: LocalDate): List<Pair<LocalDate, Long>> {
+    /**
+     * Steps per day that NoiseFit wrote to Health Connect: the band's own count, copied by NoiseFit. The phone's
+     * pedometer and apps that copy it (Fitbit) are left out; Kaya counts only the band.
+     */
+    suspend fun bandStepsViaNoiseFit(from: LocalDate, toExclusive: LocalDate): Map<LocalDate, Long> =
+        dailySteps(from, toExclusive, setOf(DataOrigin(NOISEFIT_PACKAGE))).toMap()
+
+    suspend fun dailySteps(from: LocalDate, toExclusive: LocalDate, origins: Set<DataOrigin> = emptySet()): List<Pair<LocalDate, Long>> {
         if (!canRead(StepsRecord::class)) return emptyList()
         val groups = client.aggregateGroupByPeriod(
             AggregateGroupByPeriodRequest(
                 metrics = setOf(StepsRecord.COUNT_TOTAL),
                 timeRangeFilter = TimeRangeFilter.between(from.atStartOfDay(), toExclusive.atStartOfDay()),
                 timeRangeSlicer = Period.ofDays(1),
+                dataOriginFilter = origins,
             )
         )
         return groups.map { it.startTime.toLocalDate() to (it.result[StepsRecord.COUNT_TOTAL] ?: 0L) }
