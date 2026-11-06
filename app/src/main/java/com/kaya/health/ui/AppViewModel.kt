@@ -73,9 +73,13 @@ data class SessionRow(
 const val MIN_DIGESTION = 150.0
 fun digestionKcal(eaten: Double, dayFraction: Double = 1.0) = maxOf(0.10 * eaten, MIN_DIGESTION * dayFraction.coerceIn(0.0, 1.0))
 
-data class DayBurn(val resting: Double, val workouts: Double, val everydaySteps: Double, val digestion: Double) {
-    val active get() = workouts + everydaySteps
-    val total get() = resting + workouts + everydaySteps + digestion
+data class DayBurn(
+    val resting: Double, val workouts: Double, val everydaySteps: Double, val digestion: Double,
+    /** What heart rate adds to walks beyond their steps (see Walk.heartExtraKcal). */
+    val walkHeart: Double = 0.0,
+) {
+    val active get() = workouts + everydaySteps + walkHeart
+    val total get() = resting + workouts + everydaySteps + walkHeart + digestion
     /** The likely range, shown in brackets after the number, e.g. "(1,210–1,430)". */
     val rangeText: String get() = com.kaya.health.engine.Calories.burnRange(total, resting).let { (lo, hi) -> "(${lo.kcal()}–${hi.kcal()})" }
 }
@@ -164,6 +168,19 @@ data class MotivationUi(
 
 class AppViewModel(app: Application) : AndroidViewModel(app) {
     private val bandStore = com.kaya.health.band.BandStore(app)
+    private val walkStore = com.kaya.health.band.WalkStore(app)
+
+    /** The day's walks (as on the Activity tab) and what their heart rate adds on top of the steps-based burn. */
+    private fun walkHeart(date: LocalDate): Triple<List<com.kaya.health.engine.Walk>, Double, Double> {
+        val hr = bandStore.load(date, com.kaya.health.band.Commands.METRIC_HEART_RATE)
+        val act = bandStore.load(date, com.kaya.health.band.Commands.METRIC_ACTIVITY)
+        if (hr == null || act == null) return Triple(emptyList(), 0.0, 70.0)
+        val day = com.kaya.health.band.BandDay(date, hr, act, Instant.EPOCH)
+        val resting = com.kaya.health.engine.RestingHr.fromReadings(day.hrReadings) ?: 70.0
+        val p = _profile.value
+        val walks = com.kaya.health.band.walksFor(date, day, walkStore, resting, p.age)
+        return Triple(walks, walks.sumOf { it.heartExtraKcal(weightKg(), p.heightCm, p.age, p.sex, bmr(), resting) }, resting)
+    }
     init {
         runCatching { com.kaya.health.data.Backup.schedule(app) }
         runCatching { com.kaya.health.data.Reminders.schedule(app) }
@@ -329,7 +346,11 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
         val p = _profile.value
         val est = Calories.estimate(SessionInput(s.kind, s.durationMin, s.distanceM, s.steps), weightKg(), p.heightCm)
         val hrFormula = s.hrAvg?.let { Calories.heartRateFormulaKcal(it.toDouble(), weightKg(), p.age, p.sex, s.durationMin) }
-        val check = SessionRules.judge(s.kind, est.speedKmh != null, s.hrAvg, typicalHr, overrides.get(s.id))
+        // Calories come from the band only: its steps already include any walk another app recorded (Strava, NoiseFit),
+        // so adding that app's workout counted the walk twice (3,530 kcal on a tester's day with a 2,800 kcal burn).
+        // A workout counts only if you tell Kaya to count it (e.g. a swim the band can't measure).
+        val check = if (overrides.get(s.id) == true) SessionRules.judge(s.kind, est.speedKmh != null, s.hrAvg, typicalHr, true)
+            else SessionCheck(false, "Kaya counts your band's steps and heart rate only. This came from ${friendly(s.source)}, and any steps in it are already in the band's count. Tap \"It was a real workout\" only if the band couldn't see it (e.g. swimming).", false)
         return SessionRow(s, est, hrFormula, check)
     }
 
@@ -361,6 +382,7 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             workouts = counted.sumOf { it.est.activeKcal },
             everydaySteps = Calories.everydayStepsActiveKcal(everyday, weightKg(), _profile.value.heightCm),
             digestion = digestionKcal(eaten),
+            walkHeart = runCatching { walkHeart(date).second }.getOrDefault(0.0),
         ) to steps
     }.onFailure { if (it is CancellationException) throw it }.getOrNull()
 
@@ -397,11 +419,13 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
             val sessionSteps = counted.filter { it.movementMeasured }.sumOf { it.data.steps ?: 0L }
             val everyday = max(0L, act.steps - sessionSteps)
             val minutesSoFar = Duration.between(date.atStartOfDay(zone), ZonedDateTime.now(zone)).toMinutes()
+            val walks = runCatching { walkHeart(date) }.getOrDefault(Triple(emptyList(), 0.0, 70.0))
             val burn = DayBurn(
                 resting = bmr() * minutesSoFar / 1440.0,
                 workouts = counted.sumOf { it.est.activeKcal },
                 everydaySteps = Calories.everydayStepsActiveKcal(everyday, weightKg(), p.heightCm),
                 digestion = digestionKcal(eaten, minutesSoFar / 1440.0),
+                walkHeart = walks.second,
             )
             val kg = weightKg()
             val bmrDay = bmr()
@@ -426,14 +450,22 @@ class AppViewModel(app: Application) : AndroidViewModel(app) {
                         (if (counted.isEmpty()) "none counted" else counted.joinToString(" + ") { "%,.0f".format(it.est.activeKcal) }) +
                         " = %,.0f kcal".format(burn.workouts)
                 )
+                if (burn.walkHeart > 0) {
+                    add("Walks, heart rate on top of steps (%.0f%% of the gap to the heart-rate formula, at most +%.0f%%):"
+                        .format(com.kaya.health.engine.Walk.HR_TRUST * 100, com.kaya.health.engine.Walk.HR_CAP * 100))
+                    walks.first.forEach { w ->
+                        val extra = w.heartExtraKcal(kg, p.heightCm, p.age, p.sex, bmrDay, walks.third)
+                        if (extra > 0) add("   %s, %,.0f min at avg %d bpm: +%,.0f kcal".format(w.start.toLocalTime().toString().take(5), w.minutes, w.avgHr ?: 0, extra))
+                    }
+                }
                 val ignored = sessions.size - counted.size
-                if (ignored > 0) add("   ($ignored recorded \"workout(s)\" not counted: no sign of real effort. See the workout cards.)")
+                if (ignored > 0) add("   ($ignored workout(s) from other apps not counted: the band's steps already include them. See the workout cards.)")
                 add(if (0.10 * eaten >= burn.digestion) "Digesting food: 10%% of %,.0f kcal eaten = %,.0f kcal".format(eaten, burn.digestion)
                     else "Digesting food: at least %,.0f kcal a day even when food isn't logged (10%% of %,.0f kcal logged is less), so far %,.0f kcal"
                         .format(MIN_DIGESTION, eaten, burn.digestion))
                 add(
-                    "Total: %,.0f + %,.0f + %,.0f + %,.0f = %,.0f kcal"
-                        .format(burn.resting, burn.everydaySteps, burn.workouts, burn.digestion, burn.total)
+                    "Total: %,.0f + %,.0f + %,.0f + %,.0f + %,.0f = %,.0f kcal"
+                        .format(burn.resting, burn.everydaySteps, burn.walkHeart, burn.workouts, burn.digestion, burn.total)
                 )
             }
             val allSources = (act.sources + sessions.map { it.data.source } + listOfNotNull(sleep?.source))

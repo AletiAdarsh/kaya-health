@@ -49,6 +49,14 @@ data class BandDay(
     val hourlySteps: IntArray? get() = activity?.hourly?.get("steps")
 }
 
+/** Recorded walks plus walks found in [day]'s heart rate and steps, minus ones you dismissed. */
+fun walksFor(date: LocalDate, day: BandDay?, walkStore: WalkStore, restingHr: Double, age: Int): List<com.kaya.health.engine.Walk> {
+    val recorded = walkStore.recordedOn(date)
+    val detected = com.kaya.health.engine.WalkDetector.detect(day?.hrReadings ?: emptyList(), day?.hourlySteps, restingHr, age)
+        .filter { d -> d.key !in walkStore.dismissed() && recorded.none { r -> r.start.isBefore(d.end) && d.start.isBefore(r.end) } }
+    return (recorded + detected).sortedBy { it.start }
+}
+
 enum class LiveMode { STREAM, LATEST_READING }
 
 data class LiveUi(
@@ -180,13 +188,8 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     }
 
     /** Recorded walks plus walks found in the band's heart rate and steps for [date], minus ones you dismissed. */
-    fun walksOn(date: LocalDate, restingHr: Double, age: Int): List<com.kaya.health.engine.Walk> {
-        val recorded = walkStore.recordedOn(date)
-        val day = _days.value[date]
-        val detected = com.kaya.health.engine.WalkDetector.detect(day?.hrReadings ?: emptyList(), day?.hourlySteps, restingHr, age)
-            .filter { d -> d.key !in walkStore.dismissed() && recorded.none { r -> r.start.isBefore(d.end) && d.start.isBefore(r.end) } }
-        return (recorded + detected).sortedBy { it.start }
-    }
+    fun walksOn(date: LocalDate, restingHr: Double, age: Int): List<com.kaya.health.engine.Walk> =
+        walksFor(date, _days.value[date], walkStore, restingHr, age)
 
     fun dismissWalk(w: com.kaya.health.engine.Walk) { walkStore.dismiss(w.key); _walksVersion.value++ }
     private var syncJob: Job? = null
@@ -276,6 +279,7 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
         client.ask(Commands.deviceInfo(), Commands.TYPE_DEVICE_INFO)?.let { reply ->
             Decode.deviceInfo(reply)?.let {
                 _info.value = it
+                noteFirmware(it.firmware)
                 Log.i(BandClient.TAG, "device: $it")
             }
         }
@@ -458,6 +462,18 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
     /** Inputs for the Energy score: today's overnight resting HR / HRV and your usual levels from saved history. */
     data class RecoveryInputs(val restingHr: Double?, val restingBaseline: Double?, val hrv: Double?, val hrvBaseline: Double?)
 
+    private val fwPrefs get() = getApplication<Application>().getSharedPreferences("band_firmware", android.content.Context.MODE_PRIVATE)
+
+    /** Remembers the band's firmware and the day it last changed: an update can change how the band measures HRV. */
+    private fun noteFirmware(fw: String) {
+        if (fw.isBlank()) return
+        val known = fwPrefs.getString("fw", null)
+        if (known == fw) return
+        fwPrefs.edit().putString("fw", fw).apply {
+            if (known != null) putString("since", LocalDate.now().toString())
+        }.apply()
+    }
+
     fun recoveryInputs(): RecoveryInputs {
         val today = LocalDate.now()
         val night = { l: List<Pair<LocalDateTime, Double>> -> l.filter { it.first.toLocalDate() == today && it.first.hour < 8 }.map { it.second } }
@@ -466,9 +482,16 @@ class BandViewModel(app: Application) : AndroidViewModel(app) {
         val rhrBase = restingHrHistory().filter { it.first != today }.take(14).map { it.second }.takeIf { it.size >= 2 }?.average()
         // Like for like: tonight's HRV against earlier nights' averages (the all-day average runs higher, so comparing a
         // night with it made every night look a little "below usual").
-        val hrvBase = com.kaya.health.data.BodyLog(getApplication()).nightRecords().filter { it.wakeDay != today }.takeLast(14)
-            .mapNotNull { it.hrv }.takeIf { it.size >= 2 }?.average()
-            ?: history(Vital.HRV).filter { it.date != today }.take(14).map { it.avg }.takeIf { it.size >= 2 }?.average()
+        // Your usual: the median of the last 7 nights, and only nights since the band's last firmware update (an update
+        // changed the band's HRV scale on a tester's band: nightly averages around 65 before, around 45 after). A rolling
+        // week also re-centres by itself after an update Kaya didn't see happen.
+        val fwSince = fwPrefs.getString("since", null)?.let { runCatching { LocalDate.parse(it) }.getOrNull() }
+        fun median(l: List<Double>) = l.sorted().let { if (it.isEmpty()) null else it[it.size / 2] }
+        val hrvBase = com.kaya.health.data.BodyLog(getApplication()).nightRecords()
+            .filter { it.wakeDay != today && (fwSince == null || it.wakeDay.isAfter(fwSince)) }.takeLast(7)
+            .mapNotNull { it.hrv }.takeIf { it.size >= 2 }?.let(::median)
+            ?: history(Vital.HRV).filter { it.date != today && (fwSince == null || it.date.isAfter(fwSince)) }.take(7).map { it.avg }
+                .takeIf { it.size >= 2 }?.let(::median)
         return RecoveryInputs(rhr, rhrBase, hrv, hrvBase)
     }
 

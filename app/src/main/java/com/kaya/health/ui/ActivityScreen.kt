@@ -84,7 +84,7 @@ fun ActivityScreen(vm: AppViewModel, band: BandViewModel, go: (Dest) -> Unit) {
         card(2) { WeekSteps(vm, profile.weeklySteps, days[LocalDate.now()]?.steps ?: 0L, date) { picked = it.toEpochDay() } }
         if (isToday) card(3) {
             val bodyUi by vm.body.collectAsState()
-            WalksCard(band, bodyUi.latestKg ?: profile.fallbackWeightKg, profile.heightCm, resting, profile.age)
+            WalksCard(band, bodyUi.latestKg ?: profile.fallbackWeightKg, profile.heightCm, resting, profile.age, profile.sex)
         }
         card(3) {
             androidx.compose.foundation.layout.Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {

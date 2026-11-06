@@ -32,8 +32,9 @@ object Scores {
             hrv == null -> Contributor("Heart-rate variability", 18, 30, "no reading yet, counted as average")
             hrvBaseline == null -> Contributor("Heart-rate variability", 22, 30, "${hrv.roundToInt()} ms; baseline builds over a few days")
             else -> {
+                // HRV swings ±5% night to night on its own, so that much costs nothing; 35% below usual costs everything.
                 val pctBelow = max(0.0, (hrvBaseline - hrv) / hrvBaseline * 100)
-                val pts = (30 - pctBelow * 1.5).coerceIn(0.0, 30.0).roundToInt()
+                val pts = (30 * (1 - (pctBelow - 5) / 30)).coerceIn(0.0, 30.0).roundToInt()
                 Contributor("Heart-rate variability", pts, 30, "${hrv.roundToInt()} ms vs your usual ${hrvBaseline.roundToInt()}" +
                     if (pctBelow > 10) " (lower: body still recovering)" else " (good)")
             }

@@ -172,11 +172,20 @@ class HealthRepository(private val context: Context) {
     private fun dayRange(date: LocalDate) =
         TimeRangeFilter.between(date.atStartOfDay(), date.plusDays(1).atStartOfDay())
 
-    private suspend fun <T : Record> readAll(type: KClass<T>, filter: TimeRangeFilter): List<T> {
+    /**
+     * Where Kaya takes data from: what you entered in Kaya, and NoiseFit (which copies the band). Other apps (Strava,
+     * Fitbit, the phone's own pedometer) are left out: they double-count walks the band already saw, or count steps
+     * the band didn't take.
+     */
+    private val trusted = setOf(DataOrigin(context.packageName), DataOrigin(NOISEFIT_PACKAGE))
+
+    /** [everyone] = true only for the Data check screen, which shows what every app wrote. */
+    private suspend fun <T : Record> readAll(type: KClass<T>, filter: TimeRangeFilter, everyone: Boolean = false): List<T> {
         val out = mutableListOf<T>()
         var token: String? = null
         do {
-            val resp = client.readRecords(ReadRecordsRequest(recordType = type, timeRangeFilter = filter, pageToken = token))
+            val resp = client.readRecords(ReadRecordsRequest(recordType = type, timeRangeFilter = filter, pageToken = token,
+                dataOriginFilter = if (everyone) emptySet() else trusted))
             out += resp.records
             token = resp.pageToken
         } while (!token.isNullOrEmpty())
@@ -195,7 +204,7 @@ class HealthRepository(private val context: Context) {
             if (canRead(ActiveCaloriesBurnedRecord::class)) add(ActiveCaloriesBurnedRecord.ACTIVE_CALORIES_TOTAL)
         }
         if (metrics.isEmpty()) return DayActivity(0, null, null, null, null, null, emptySet())
-        val r = client.aggregate(AggregateRequest(metrics = metrics, timeRangeFilter = dayRange(date)))
+        val r = client.aggregate(AggregateRequest(metrics = metrics, timeRangeFilter = dayRange(date), dataOriginFilter = trusted))
         return DayActivity(
             steps = r[StepsRecord.COUNT_TOTAL] ?: 0L,
             distanceM = r[DistanceRecord.DISTANCE_TOTAL]?.inMeters,
@@ -245,7 +254,7 @@ class HealthRepository(private val context: Context) {
                 if (canRead(StepsRecord::class)) add(StepsRecord.COUNT_TOTAL)
             }
             val r = if (metrics.isEmpty()) null
-            else client.aggregate(AggregateRequest(metrics = metrics, timeRangeFilter = window))
+            else client.aggregate(AggregateRequest(metrics = metrics, timeRangeFilter = window, dataOriginFilter = trusted))
             val reported = recordedCalories(s.metadata.dataOrigin.packageName, window)
             SessionData(
                 recordingMethod = s.metadata.recordingMethod,
@@ -353,7 +362,7 @@ class HealthRepository(private val context: Context) {
         val noPermission = mutableListOf<String>()
 
         suspend fun <T : Record> raw(type: KClass<T>, label: String, filter: TimeRangeFilter = range): List<T> =
-            if (canRead(type)) readAll(type, filter) else { noPermission += label; emptyList() }
+            if (canRead(type)) readAll(type, filter, everyone = true) else { noPermission += label; emptyList() }
 
         fun <T : Record> bySource(records: List<T>, start: (T) -> Instant, end: (T) -> Instant, value: (T) -> Double) =
             records.groupBy { it.metadata.dataOrigin.packageName }.map { (src, v) ->
@@ -464,6 +473,7 @@ class HealthRepository(private val context: Context) {
                 metrics = setOf(NutritionRecord.ENERGY_TOTAL),
                 timeRangeFilter = TimeRangeFilter.between(from.atStartOfDay(), toExclusive.atStartOfDay()),
                 timeRangeSlicer = Period.ofDays(1),
+                dataOriginFilter = trusted,
             )
         )
         return groups.mapNotNull { g ->

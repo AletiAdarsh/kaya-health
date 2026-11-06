@@ -190,7 +190,7 @@ object Calories {
     /**
      * The heart-rate formula most watches use (Keytel et al., 2005, without a fitness term).
      * NoiseFit's workout numbers match this within a few percent. Kept here only to show
-     * where the watch's number comes from. Kaya never uses it for its own estimates.
+     * where the watch's number comes from. Kaya uses only part of it, for walks: see [Walk.heartExtraKcal].
      */
     fun heartRateFormulaKcal(avgHr: Double, weightKg: Double, age: Int, sex: Sex, minutes: Double): Double {
         val kjPerMin = if (sex == Sex.MALE)

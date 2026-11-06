@@ -41,7 +41,9 @@ private val clock = DateTimeFormatter.ofPattern("h:mm a")
 
 /** Start walk (live) plus today's walks, recorded or found automatically. */
 @Composable
-fun WalksCard(band: BandViewModel, weightKg: Double, heightCm: Double, restingHr: Double, age: Int) {
+fun WalksCard(band: BandViewModel, weightKg: Double, heightCm: Double, restingHr: Double, age: Int, sex: com.kaya.health.engine.Sex) {
+    val bmrDay = com.kaya.health.engine.Calories.bmr(weightKg, heightCm, age, sex)
+    fun kcal(w: Walk) = w.totalExtraKcal(weightKg, heightCm, age, sex, bmrDay, restingHr).roundToInt()
     val walk by band.walk.collectAsState()
     val live by band.live.collectAsState()
     val version by band.walksVersion.collectAsState()
@@ -76,7 +78,7 @@ fun WalksCard(band: BandViewModel, weightKg: Double, heightCm: Double, restingHr
         } else {
             justDone?.let { w ->
                 Text(
-                    "Nice: ${w.minutes.roundToInt()} min, %,d steps, %.2f km, ~${w.extraKcal(weightKg, heightCm).roundToInt()} kcal.".format(w.steps, w.distanceM(heightCm) / 1000),
+                    "Nice: ${w.minutes.roundToInt()} min, %,d steps, %.2f km, ~${kcal(w)} kcal.".format(w.steps, w.distanceM(heightCm) / 1000),
                     style = MaterialTheme.typography.titleMedium, color = Area.food,
                 )
             }
@@ -87,14 +89,14 @@ fun WalksCard(band: BandViewModel, weightKg: Double, heightCm: Double, restingHr
                 Icon(Icons.Rounded.PlayArrow, contentDescription = null, modifier = Modifier.size(20.dp)); Text("  Start walk")
             }
             if (walks.isEmpty()) Muted("No walks yet today. Walks of 10+ minutes show up here by themselves, found from your heart rate and steps.")
-            walks.forEach { w -> WalkRow(w, weightKg, heightCm) { band.dismissWalk(w) } }
-            if (walks.isNotEmpty()) Muted("Walk calories are already part of today's burn (they come from your steps), so they aren't added twice.")
+            walks.forEach { w -> WalkRow(w, heightCm, kcal(w)) { band.dismissWalk(w) } }
+            if (walks.isNotEmpty()) Muted("Walk calories are already part of today's burn: the steps part through your steps, plus what your heart rate shows on top. Nothing is counted twice.")
         }
     }
 }
 
 @Composable
-private fun WalkRow(w: Walk, weightKg: Double, heightCm: Double, onDismiss: () -> Unit) {
+private fun WalkRow(w: Walk, heightCm: Double, kcal: Int, onDismiss: () -> Unit) {
     Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Column(Modifier.weight(1f)) {
@@ -104,7 +106,7 @@ private fun WalkRow(w: Walk, weightKg: Double, heightCm: Double, onDismiss: () -
                 )
                 Text(
                     "%,d steps · %.1f km/h".format(w.steps, w.speedKmh(heightCm)) + (w.avgHr?.let { " · avg $it bpm" } ?: "") +
-                        " · ~${w.extraKcal(weightKg, heightCm).roundToInt()} kcal",
+                        " · ~$kcal kcal",
                     style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
             }

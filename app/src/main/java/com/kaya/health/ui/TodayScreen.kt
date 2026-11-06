@@ -118,6 +118,7 @@ private fun BurnCard(ui: TodayUi, burn: DayBurn) {
         LineItem("Resting (body running itself)", burn.resting.kcal())
         LineItem("Workouts (extra)", burn.workouts.kcal())
         LineItem("Everyday steps (extra)", burn.everydaySteps.kcal())
+        if (burn.walkHeart > 0) LineItem("Walks: heart rate on top of steps", burn.walkHeart.kcal())
         if (burn.digestion > 0) LineItem("Digesting food", burn.digestion.kcal())
         HorizontalDivider(Modifier.padding(vertical = 4.dp))
         LineItem("Kaya says active", "${burn.active.kcal()} kcal", strong = true, valueColor = MaterialTheme.colorScheme.primary)
